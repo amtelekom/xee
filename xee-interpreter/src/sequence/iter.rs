@@ -1,31 +1,32 @@
-use xot::Xot;
+use xee_datasource::XmlNode;
 
+use crate::function::XmlDS;
 use crate::{atomic, error, function};
 
 use super::item::Item;
 
 /// An iterator over the nodes in a sequence.
-pub struct NodeIter<I>
+pub struct NodeIter<I, N: XmlNode>
 where
-    I: Iterator<Item = Item>,
+    I: Iterator<Item = Item<N>>,
 {
     iter: I,
 }
 
-impl<I> NodeIter<I>
+impl<I, N: XmlNode> NodeIter<I, N>
 where
-    I: Iterator<Item = Item>,
+    I: Iterator<Item = Item<N>>,
 {
     pub(crate) fn new(iter: I) -> Self {
         Self { iter }
     }
 }
 
-impl<I> Iterator for NodeIter<I>
+impl<I, N: XmlNode> Iterator for NodeIter<I, N>
 where
-    I: Iterator<Item = Item>,
+    I: Iterator<Item = Item<N>>,
 {
-    type Item = error::Result<xot::Node>;
+    type Item = error::Result<N>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.iter.next();
@@ -38,31 +39,31 @@ where
 }
 
 /// An iterator atomizing a sequence.
-pub struct AtomizedIter<'a, I>
+pub struct AtomizedIter<'a, I, S: XmlDS>
 where
-    I: Iterator<Item = Item> + 'a,
+    I: Iterator<Item = Item<S::Node>> + 'a,
 {
-    xot: &'a Xot,
+    source: &'a S,
     iter: I,
-    item_iter: Option<AtomizedItemIter<'a>>,
+    item_iter: Option<AtomizedItemIter<'a, S>>,
 }
 
-impl<'a, I> AtomizedIter<'a, I>
+impl<'a, I, S: XmlDS> AtomizedIter<'a, I, S>
 where
-    I: Iterator<Item = Item>,
+    I: Iterator<Item = Item<S::Node>>,
 {
-    pub(crate) fn new(xot: &'a Xot, iter: I) -> AtomizedIter<'a, I> {
+    pub(crate) fn new(source: &'a S, iter: I) -> AtomizedIter<'a, I, S> {
         AtomizedIter {
-            xot,
+            source,
             iter,
             item_iter: None,
         }
     }
 }
 
-impl<'a, I> Iterator for AtomizedIter<'a, I>
+impl<'a, I, S: XmlDS> Iterator for AtomizedIter<'a, I, S>
 where
-    I: Iterator<Item = Item> + 'a,
+    I: Iterator<Item = Item<S::Node>> + 'a,
 {
     type Item = error::Result<atomic::Atomic>;
 
@@ -80,7 +81,7 @@ where
             // if not, move on to the next item; if there are no more items,
             // we're done
             let item = self.iter.next()?;
-            self.item_iter = Some(AtomizedItemIter::new(item, self.xot));
+            self.item_iter = Some(AtomizedItemIter::new(item, self.source));
         }
     }
 
@@ -94,28 +95,28 @@ where
 }
 
 /// Atomizing an individual item in a sequence.
-pub enum AtomizedItemIter<'a> {
+pub enum AtomizedItemIter<'a, S: XmlDS> {
     Atomic(std::iter::Once<atomic::Atomic>),
     Node(AtomizedNodeIter),
-    Array(AtomizedArrayIter<'a>),
+    Array(AtomizedArrayIter<'a, S>),
     // TODO: properly handle functions; for now they error
     Erroring(std::iter::Once<error::Result<atomic::Atomic>>),
 }
 
-impl<'a> AtomizedItemIter<'a> {
-    pub(crate) fn new(item: Item, xot: &'a Xot) -> Self {
+impl<'a, S: XmlDS> AtomizedItemIter<'a, S> {
+    pub(crate) fn new(item: Item<S::Node>, source: &'a S) -> Self {
         match item {
             Item::Atomic(a) => Self::Atomic(std::iter::once(a)),
-            Item::Node(n) => Self::Node(AtomizedNodeIter::new(n, xot)),
+            Item::Node(n) => Self::Node(AtomizedNodeIter::new(n, source)),
             Item::Function(function) => match function {
-                function::Function::Array(a) => Self::Array(AtomizedArrayIter::new(a, xot)),
+                function::Function::Array(a) => Self::Array(AtomizedArrayIter::new(a, source)),
                 _ => Self::Erroring(std::iter::once(Err(error::Error::FOTY0013))),
             },
         }
     }
 }
 
-impl Iterator for AtomizedItemIter<'_> {
+impl<S: XmlDS> Iterator for AtomizedItemIter<'_, S> {
     type Item = error::Result<atomic::Atomic>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -144,8 +145,8 @@ pub struct AtomizedNodeIter {
 }
 
 impl AtomizedNodeIter {
-    fn new(node: xot::Node, xot: &Xot) -> Self {
-        let s = xot.string_value(node);
+    fn new<S: XmlDS>(node: S::Node, source: &S) -> Self {
+        let s = source.string_value(node);
         let typed_value = vec![atomic::Atomic::Untyped(s.into())];
         Self {
             typed_value,
@@ -174,17 +175,17 @@ impl Iterator for AtomizedNodeIter {
 }
 
 /// Atomizing a XPath array
-pub struct AtomizedArrayIter<'a> {
-    xot: &'a Xot,
-    array: function::Array,
+pub struct AtomizedArrayIter<'a, S: XmlDS> {
+    source: &'a S,
+    array: function::Array<S::Node>,
     array_index: usize,
     iter: Option<std::vec::IntoIter<error::Result<atomic::Atomic>>>,
 }
 
-impl<'a> AtomizedArrayIter<'a> {
-    fn new(array: function::Array, xot: &'a Xot) -> Self {
+impl<'a, S: XmlDS> AtomizedArrayIter<'a, S> {
+    fn new(array: function::Array<S::Node>, source: &'a S) -> Self {
         Self {
-            xot,
+            source,
             array,
             array_index: 0,
             iter: None,
@@ -192,7 +193,7 @@ impl<'a> AtomizedArrayIter<'a> {
     }
 }
 
-impl Iterator for AtomizedArrayIter<'_> {
+impl<S: XmlDS> Iterator for AtomizedArrayIter<'_, S> {
     type Item = error::Result<atomic::Atomic>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -217,7 +218,7 @@ impl Iterator for AtomizedArrayIter<'_> {
             // an array reference cannot live long enough, but an owned
             // array also cannot live long enough. So we collect things
             // into a vector...
-            let v = sequence.atomized(self.xot).collect::<Vec<_>>();
+            let v = sequence.atomized(self.source).collect::<Vec<_>>();
             self.iter = Some(v.into_iter());
         }
     }
@@ -235,10 +236,14 @@ pub(crate) fn one<'a, T>(mut iter: impl Iterator<Item = T> + 'a) -> error::Resul
         if iter.next().is_none() {
             Ok(one)
         } else {
-            Err(error::Error::XPTY0004)
+            Err(error::Error::XPTY0004(
+                "iter::one called with more than one item",
+            ))
         }
     } else {
-        Err(error::Error::XPTY0004)
+        Err(error::Error::XPTY0004(
+            "iter::one called with an empty iterator",
+        ))
     }
 }
 
@@ -247,7 +252,9 @@ pub(crate) fn option<'a, T>(mut iter: impl Iterator<Item = T> + 'a) -> error::Re
         if iter.next().is_none() {
             Ok(Some(one))
         } else {
-            Err(error::Error::XPTY0004)
+            Err(error::Error::XPTY0004(
+                "iter::option called with more than one item",
+            ))
         }
     } else {
         Ok(None)

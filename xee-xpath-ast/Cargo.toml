@@ -20,7 +20,7 @@ serde = [
     "xee-schema-type/serde",
     "xee-xpath-type/serde",
     "xee-name/serde",
-    "xot/serde",
+#    "xot/serde",
 ]
 
 [dependencies]
@@ -28,6 +28,7 @@ xee-schema-type = { path = "../xee-schema-type", version = "0.1.4" }
 xee-name = { path = "../xee-name", version = "0.1.5" }
 xee-xpath-type = { path = "../xee-xpath-type", version = "0.1.4" }
 xee-xpath-lexer = { path = "../xee-xpath-lexer", version = "0.1.4" }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }
 ahash = { workspace = true }
 chumsky = { workspace = true }
 blanket = { workspace = true }
@@ -35,7 +36,6 @@ ordered-float = { workspace = true }
 ibig = { workspace = true }
 rust_decimal = { workspace = true }
 thiserror = { workspace = true }
-xot = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 
 
@@ -43,6 +43,5 @@ serde = { workspace = true, features = ["derive"], optional = true }
 # we want to depend on serde feature during tests
 xee-xpath-ast = { path = ".", features = ["serde"] }
 insta = { workspace = true, features = ["ron", "glob"] }
-xot = { workspace = true, features = ["proptest"] }
 rust_decimal_macros = { workspace = true }
 ron = { workspace = true }

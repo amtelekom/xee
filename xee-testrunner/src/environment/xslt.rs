@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use xee_xpath::{Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::catalog::LoadContext;
 
@@ -51,7 +52,7 @@ impl Environment for XsltEnvironmentSpec {
         &self.environment_spec
     }
 
-    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self, Xot>> {
         let environment_spec_query = EnvironmentSpec::load_with_context(queries, context)?;
         let file_query = queries.option("@file/string()", convert_string)?;
         let stylesheets_query = queries.many("stylesheet", move |documents, item| {

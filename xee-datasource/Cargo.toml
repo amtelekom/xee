@@ -1,0 +1,16 @@
+[package]
+name = "xee-datasource"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+
+[dependencies]
+xot = { workspace = true, features = [], optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+ahash = "0.8.12"
+
+[features]
+default = ["xot"]
+xot = ["dep:xot"]
+serde = ["xot/serde", "dep:serde"]

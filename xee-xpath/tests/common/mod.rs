@@ -2,21 +2,25 @@
 // it thinks these functions are not used, even though they are
 #![allow(dead_code)]
 
+use xee_datasource::XmlNodeWrapper;
 use xee_xpath::{
     context::{StaticContextBuilder, Variables},
     error, Documents, Item, Queries, Query, Sequence,
 };
-use xot::Xot;
+use xot::{Node, Xot};
 
-pub(crate) fn run(s: &str) -> error::Result<Sequence> {
-    let mut documents = Documents::new();
+pub(crate) fn run(s: &str) -> error::Result<Sequence<Node>> {
+    let mut documents = Documents::new(Xot::new());
     let queries = Queries::default();
     let q = queries.sequence(s)?;
     q.execute_build_context(&mut documents, |_builder| ())
 }
 
-pub(crate) fn run_with_variables(s: &str, variables: Variables) -> error::Result<Sequence> {
-    let mut documents = Documents::new();
+pub(crate) fn run_with_variables(
+    s: &str,
+    variables: Variables<Xot>,
+) -> error::Result<Sequence<Node>> {
+    let mut documents = Documents::new(Xot::new());
     let queries = Queries::default();
     let mut static_context_builder = StaticContextBuilder::default();
     static_context_builder.variable_names(variables.keys().cloned());
@@ -27,16 +31,20 @@ pub(crate) fn run_with_variables(s: &str, variables: Variables) -> error::Result
     })
 }
 
-pub(crate) fn run_xml(xml: &str, xpath: &str) -> error::Result<Sequence> {
-    let mut documents = Documents::new();
+pub(crate) fn run_xml(xml: &str, xpath: &str) -> error::Result<Sequence<Node>> {
+    let mut documents = Documents::new(Xot::new());
     let handle = documents.add_string_without_uri(xml).unwrap();
     let queries = Queries::default();
     let q = queries.sequence(xpath)?;
     q.execute(&mut documents, handle)
 }
 
-pub(crate) fn run_xml_default_ns(xml: &str, xpath: &str, ns: &str) -> error::Result<Sequence> {
-    let mut documents = Documents::new();
+pub(crate) fn run_xml_default_ns(
+    xml: &str,
+    xpath: &str,
+    ns: &str,
+) -> error::Result<Sequence<Node>> {
+    let mut documents = Documents::new(Xot::new());
     let handle = documents.add_string_without_uri(xml).unwrap();
     let mut static_context_builder = StaticContextBuilder::default();
     static_context_builder.default_element_namespace(ns);
@@ -49,10 +57,10 @@ pub(crate) fn assert_nodes<S>(xml: &str, xpath: &str, get_nodes: S) -> error::Re
 where
     S: Fn(&Xot, xot::Node) -> Vec<xot::Node>,
 {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let handle = documents.add_string_without_uri(xml).unwrap();
     let root = documents.document_node(handle).unwrap();
-    let nodes = get_nodes(documents.xot(), root);
+    let nodes = get_nodes(documents.source(), root);
 
     let queries = Queries::default();
     let q = queries.sequence(xpath)?;
@@ -67,8 +75,8 @@ pub(crate) fn run_xml_with_ns(
     xml: &str,
     xpath: &str,
     namespaces: &[(&str, &str)],
-) -> error::Result<Sequence> {
-    let mut documents = Documents::new();
+) -> error::Result<Sequence<xot::Node>> {
+    let mut documents = Documents::new(xot::Xot::new());
     let handle = documents.add_string_without_uri(xml).unwrap();
     let mut static_context_builder = StaticContextBuilder::default();
     for (prefix, uri) in namespaces {
@@ -79,10 +87,10 @@ pub(crate) fn run_xml_with_ns(
     q.execute(&mut documents, handle)
 }
 
-fn xot_nodes_to_items(node: &[xot::Node]) -> Sequence {
+fn xot_nodes_to_items(node: &[xot::Node]) -> Sequence<Node> {
     Sequence::from(
         node.iter()
-            .map(|&node| Item::from(node))
+            .map(|&node| Item::<Node>::from(XmlNodeWrapper(node)))
             .collect::<Vec<_>>(),
     )
 }

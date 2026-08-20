@@ -1,4 +1,5 @@
 use num::{FromPrimitive, ToPrimitive};
+use xee_datasource::XmlDS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Instruction {
@@ -559,7 +560,7 @@ pub(crate) fn read_u8(bytes: &[u8], ip: &mut usize) -> u8 {
 
 use crate::function::InlineFunction;
 
-impl InlineFunction {
+impl<S: XmlDS> InlineFunction<S> {
     pub fn decoded(&self) -> Vec<Instruction> {
         decode_instructions(&self.chunk)
     }

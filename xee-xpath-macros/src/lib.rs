@@ -20,9 +20,16 @@ pub fn xpath_fn(
     let options = parse_macro_input!(attr as XPathFnOptions);
     let ast = parse_macro_input!(input as syn::ItemFn);
     let wrapper = xpath_fn_wrapper(&ast, &options).unwrap_or_else(|e| e.into_compile_error());
-    quote!(
+    let out = quote!(
         #ast
         #wrapper
-    )
-    .into()
+    );
+    // match proc_macro_crate::crate_name("xee-interpreter").unwrap() {
+    //     proc_macro_crate::FoundCrate::Itself => {}
+    //     _ => {
+    //         eprintln!("{out}");
+    //         panic!()
+    //     }
+    // }
+    out.into()
 }

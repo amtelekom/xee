@@ -1,21 +1,45 @@
-use proc_macro2::{Ident, Span};
+use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro_crate::FoundCrate;
 use quote::{format_ident, quote, ToTokens};
 use syn::spanned::Spanned;
-use syn::{ItemFn, LitStr, Type};
+use syn::{GenericArgument, ItemFn, LitStr, PathArguments, ReturnType, Type};
 
+use xee_datasource::xmlname::NameStrInfo;
 use xee_xpath_ast::ast::Signature;
-use xot::xmlname::NameStrInfo;
 
 use crate::convert::convert_sequence_type;
 use crate::parse::XPathFnOptions;
 
+/// Create the XPath function wrapper
+///
+/// `specific_xmlds`: Whether this function is generic over all XmlDS implementers (= None),
+/// usually all implementations in xee-interpreter use this,
+/// or if this function is implemented for a specific XmlDS, and if so, what it's Identifier is
 pub(crate) fn xpath_fn_wrapper(
     ast: &ItemFn,
     options: &XPathFnOptions,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let name = &ast.sig.ident;
     let wrapper_name = format_ident!("wrapper_{}", name);
-    let wrapper = make_wrapper(name, &wrapper_name, ast, &options.signature)?;
+
+    let interpreter_crate = match proc_macro_crate::crate_name("xee-interpreter")
+        .expect("Need to depend on xee-interpreter to use xee-xpath-macros!")
+    {
+        FoundCrate::Itself => quote!(crate),
+        FoundCrate::Name(n) => {
+            let n = Ident::new(&n, Span::call_site());
+            quote! { ::#n }
+        }
+    };
+
+    let wrapper = make_wrapper(
+        name,
+        &wrapper_name,
+        ast,
+        &options.signature,
+        &interpreter_crate,
+        &options.xmlds,
+    )?;
 
     let vis = &ast.vis;
     let signature_string = LitStr::new(&options.signature_string, Span::call_site());
@@ -24,6 +48,21 @@ pub(crate) fn xpath_fn_wrapper(
     } else {
         LitStr::new("", Span::call_site())
     };
+    let impl_on_ds = if let Some(ds) = &options.xmlds {
+        // if this is only implemented on a specific Datasource, just impl using that
+        quote! {
+            impl #name::Wrapper<#ds> {
+                const WRAPPER: #interpreter_crate::function::StaticFunctionType<#ds> = #wrapper_name;
+            }
+        }
+    } else {
+        // else, create a generic impl:
+        quote! {
+            impl<S: ::xee_datasource::XmlDS + #interpreter_crate::function::SourceSpecificFunctions> #name::Wrapper<S> {
+                const WRAPPER: #interpreter_crate::function::StaticFunctionType<S> = #wrapper_name;
+            }
+        }
+    };
     Ok(quote! {
         // create a module with the same name as the function - this way `use
         // <the function> will bring both the function and module into scope.
@@ -31,8 +70,9 @@ pub(crate) fn xpath_fn_wrapper(
         // we access with the wrap_xpath_fn! macro.
         #[doc(hidden)]
         #vis mod #name {
-            pub(crate) struct MakeWrapper;
-            pub(crate) const WRAPPER: crate::function::StaticFunctionType = MakeWrapper::WRAPPER;
+            pub(crate) struct Wrapper<S: ::xee_datasource::XmlDS + #interpreter_crate::function::SourceSpecificFunctions> {
+                _phantom: std::marker::PhantomData<S>,
+            }
             // We store the signature as a string; this means we need to
             // reparse it again later during registration, but it's a lot
             // easier than trying to serialize a data structure, so it will
@@ -47,10 +87,9 @@ pub(crate) fn xpath_fn_wrapper(
         // original function may be inside of a function body.
         const _: () = {
             // This is a trick to ensure we can get it into the module defined
-            // above
-            impl #name::MakeWrapper {
-                const WRAPPER: crate::function::StaticFunctionType = #wrapper_name;
-            }
+            // above, that also helps with having a WRAPPER per XmlDS impl generic type parameter
+            #impl_on_ds
+
             #vis #wrapper
         };
     })
@@ -61,6 +100,8 @@ fn make_wrapper(
     wrapper_name: &Ident,
     ast: &ItemFn,
     signature: &Signature,
+    interpreter_crate: &TokenStream,
+    xmlds: &Option<Ident>,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut conversions = Vec::new();
     let mut conversion_names = Vec::new();
@@ -85,23 +126,61 @@ fn make_wrapper(
             fn_arg,
             name.to_token_stream(),
             arg,
+            interpreter_crate,
         )?);
     }
 
-    let body = if is_result(ast) {
+    let rti = eval_return_type(ast);
+
+    // Due to generics stuff, we cannot use From/Into for everything,
+    // so for some cases we need an explicit type conversion:
+    let return_conv = if rti.is_xmlnode {
+        if rti.is_option {
+            quote!(value.map(::xee_datasource::XmlNodeWrapper).into())
+        } else if rti.is_vec {
+            quote!(#interpreter_crate::sequence::Sequence::new(
+                value
+                    .into_iter()
+                    .map(::xee_datasource::XmlNodeWrapper)
+                    .map(#interpreter_crate::sequence::Item::from)
+                    .collect::<Vec<_>>()
+            ))
+        } else {
+            quote!(::xee_datasource::XmlNodeWrapper(value).into())
+        }
+    } else {
+        quote!(value.into())
+    };
+
+    let body = if rti.is_result {
         quote!(#(#conversions)*;
         let value = #name(#(#conversion_names),*);
-        value.map(|v| v.into()))
+        value.map(|value| #return_conv))
     } else {
         quote!(#(#conversions)*;
         let value = #name(#(#conversion_names),*);
-        Ok(value.into()))
+        Ok(#return_conv))
     };
 
-    Ok(quote!(
-        fn #wrapper_name(context: &crate::context::DynamicContext, interpreter: &mut crate::interpreter::Interpreter, arguments: &[crate::sequence::Sequence]) -> Result<crate::sequence::Sequence, crate::error::Error> {
-        #body
-    }))
+    if let Some(ds) = &xmlds {
+        Ok(quote!(
+            fn #wrapper_name(
+                context: &#interpreter_crate::context::DynamicContext<#ds>,
+                interpreter: &mut #interpreter_crate::interpreter::Interpreter<#ds>,
+                arguments: &[#interpreter_crate::sequence::Sequence<<#ds as ::xee_datasource::XmlDS>::Node>]
+            ) -> Result<#interpreter_crate::sequence::Sequence<<#ds as ::xee_datasource::XmlDS>::Node>, #interpreter_crate::error::Error> {
+            #body
+        }))
+    } else {
+        Ok(quote!(
+            fn #wrapper_name<S: ::xee_datasource::XmlDS + #interpreter_crate::function::SourceSpecificFunctions>(
+                context: &#interpreter_crate::context::DynamicContext<S>,
+                interpreter: &mut #interpreter_crate::interpreter::Interpreter<S>,
+                arguments: &[#interpreter_crate::sequence::Sequence<S::Node>]
+            ) -> Result<#interpreter_crate::sequence::Sequence<S::Node>, #interpreter_crate::error::Error> {
+            #body
+        }))
+    }
 }
 
 fn get_argument_ident(ast: &ItemFn, index: usize, name: &str) -> syn::Result<Option<Ident>> {
@@ -131,26 +210,76 @@ fn get_argument_ident(ast: &ItemFn, index: usize, name: &str) -> syn::Result<Opt
     }
 }
 
-fn is_result(ast: &ItemFn) -> bool {
+#[derive(Default)]
+struct ReturnTypeInfo {
+    /// true if the funtion returns any `-> Result<_>`
+    is_result: bool,
+    /// true if the function returns `-> Option<_>` or `-> Result<Option<_>>`
+    is_option: bool,
+    /// true if the function returns `-> Vec<_>` (or wrapped in Result/Option)
+    is_vec: bool,
+    /// true if the function returns something that looks like an XmlNode
+    is_xmlnode: bool,
+}
+
+/// Checks if a type is a specific generic wrapper (Result, Option),
+/// and returns the "inner" type (or the original if not wrapped)
+fn is_wrapped_in<'a>(type_: &'a Type, wrapper_name: &str) -> (bool, &'a Type) {
+    match type_ {
+        Type::Path(type_path) => {
+            let last_seg = type_path.path.segments.last().unwrap();
+            let is_wrapped = last_seg.ident.to_string().as_str() == wrapper_name;
+
+            let inner_type = if is_wrapped {
+                if let PathArguments::AngleBracketed(args) = &last_seg.arguments {
+                    if let GenericArgument::Type(inner_type) = args.args.first().unwrap() {
+                        inner_type
+                    } else {
+                        unreachable!("{wrapper_name} doesn't have an inner type...?")
+                    }
+                } else {
+                    unreachable!("{wrapper_name} doesn't have an inner type...?")
+                }
+            } else {
+                // there is no result, so the return type is the "inner" return
+                type_
+            };
+
+            (is_wrapped, inner_type)
+        }
+        _ => (false, type_),
+    }
+}
+
+fn eval_return_type(ast: &ItemFn) -> ReturnTypeInfo {
     let return_type = &ast.sig.output;
     match return_type {
-        syn::ReturnType::Default => false,
-        syn::ReturnType::Type(_, type_) => match type_.as_ref() {
-            Type::Path(type_path) => {
-                matches!(
-                    type_path
-                        .path
-                        .segments
-                        .last()
-                        .unwrap()
-                        .ident
-                        .to_string()
-                        .as_str(),
-                    "Result"
-                )
+        ReturnType::Default => ReturnTypeInfo::default(),
+        ReturnType::Type(_, type_) => {
+            let (is_result, type_) = is_wrapped_in(type_.as_ref(), "Result");
+            let (is_option, type_) = is_wrapped_in(type_, "Option");
+            let (is_vec, type_) = is_wrapped_in(type_, "Vec");
+            let is_xmlnode = if let Type::Path(type_path) = type_ {
+                let segs: Vec<_> = type_path
+                    .path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect();
+                const XMLNODE_1: [&str; 2] = ["S", "Node"];
+                const XMLNODE_2: [&str; 1] = ["N"];
+                segs == XMLNODE_1 || segs == XMLNODE_2
+            } else {
+                false
+            };
+
+            ReturnTypeInfo {
+                is_result,
+                is_option,
+                is_vec,
+                is_xmlnode,
             }
-            _ => false,
-        },
+        }
     }
 }
 

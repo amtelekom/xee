@@ -1,6 +1,5 @@
 use ahash::HashSet;
-
-use crate::Name;
+use xee_datasource::xmlname::OwnedName;
 
 /// A set of variable names.
-pub type VariableNames = HashSet<Name>;
+pub type VariableNames = HashSet<OwnedName>;

@@ -7,6 +7,7 @@ use ibig::IBig;
 use ordered_float::OrderedFloat;
 use rust_decimal::Decimal;
 
+use xee_datasource::xmlname::OwnedName;
 pub use xee_interpreter::function::Name;
 use xee_interpreter::function::{CastType, Signature, StaticFunctionId};
 use xee_interpreter::sequence::SerializationParameters;
@@ -15,7 +16,6 @@ use xee_schema_type::Xs;
 pub use xee_xpath_ast::ast::{BinaryOperator, SequenceType, UnaryOperator};
 use xee_xpath_ast::span::Spanned;
 use xee_xpath_ast::Pattern;
-use xot::xmlname;
 
 pub type AtomS = Spanned<Atom>;
 pub type ExprS = Spanned<Expr>;
@@ -337,7 +337,7 @@ pub struct ApplyTemplates {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ApplyTemplatesModeValue {
-    Named(xmlname::OwnedName),
+    Named(OwnedName),
     Unnamed,
     Current,
 }
@@ -362,7 +362,7 @@ pub struct Rule {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ModeValue {
-    Named(xmlname::OwnedName),
+    Named(OwnedName),
     Unnamed,
     All,
 }
@@ -373,7 +373,7 @@ pub struct Mode {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declarations {
     pub rules: Vec<Rule>,
-    pub modes: HashMap<Option<xmlname::OwnedName>, Mode>,
+    pub modes: HashMap<Option<OwnedName>, Mode>,
     pub functions: Vec<FunctionBinding>,
     pub main: FunctionDefinition,
     pub serialization_params: SerializationParameters,

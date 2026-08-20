@@ -1,4 +1,4 @@
-// https://www.w3.org/TR/xpath-functions-31/#dates-times
+//! https://www.w3.org/TR/xpath-functions-31/#dates-times
 
 use chrono::{Datelike, Offset, SubsecRound, Timelike};
 use ibig::IBig;
@@ -7,6 +7,7 @@ use xee_xpath_macros::xpath_fn;
 
 use crate::atomic::ToDateTimeStamp;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::{
     atomic::NaiveDateTimeWithOffset, atomic::NaiveDateWithOffset, atomic::NaiveTimeWithOffset,
     context::DynamicContext, error, wrap_xpath_fn,
@@ -165,8 +166,8 @@ fn timezone_from_time(arg: Option<NaiveTimeWithOffset>) -> error::Result<Option<
 }
 
 #[xpath_fn("fn:adjust-dateTime-to-timezone($arg as xs:dateTime?) as xs:dateTime?")]
-fn adjust_date_time_to_timezone1(
-    context: &DynamicContext,
+fn adjust_date_time_to_timezone1<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: Option<NaiveDateTimeWithOffset>,
 ) -> error::Result<Option<NaiveDateTimeWithOffset>> {
     adjust_date_time_to_timezone(arg, Some(context.implicit_timezone()))
@@ -206,8 +207,8 @@ fn adjust_date_time_to_timezone(
 }
 
 #[xpath_fn("fn:adjust-date-to-timezone($arg as xs:date?) as xs:date?")]
-fn adjust_date_to_timezone1(
-    context: &crate::context::DynamicContext,
+fn adjust_date_to_timezone1<S: XmlDS>(
+    context: &crate::context::DynamicContext<S>,
     arg: Option<NaiveDateWithOffset>,
 ) -> error::Result<Option<NaiveDateWithOffset>> {
     adjust_date_to_timezone(arg, Some(context.implicit_timezone()))
@@ -246,8 +247,8 @@ fn adjust_date_to_timezone(
 }
 
 #[xpath_fn("fn:adjust-time-to-timezone($arg as xs:time?) as xs:time?")]
-fn adjust_time_to_timezone1(
-    context: &crate::context::DynamicContext,
+fn adjust_time_to_timezone1<S: XmlDS>(
+    context: &crate::context::DynamicContext<S>,
     arg: Option<NaiveTimeWithOffset>,
 ) -> error::Result<Option<NaiveTimeWithOffset>> {
     adjust_time_to_timezone(arg, Some(context.implicit_timezone()))
@@ -338,30 +339,30 @@ fn parse_ietf_date(value: Option<&str>) -> error::Result<Option<NaiveDateTimeWit
     }
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(date_time),
-        wrap_xpath_fn!(year_from_date_time),
-        wrap_xpath_fn!(month_from_date_time),
-        wrap_xpath_fn!(day_from_date_time),
-        wrap_xpath_fn!(hours_from_date_time),
-        wrap_xpath_fn!(minutes_from_date_time),
-        wrap_xpath_fn!(seconds_from_date_time),
-        wrap_xpath_fn!(timezone_from_date_time),
-        wrap_xpath_fn!(year_from_date),
-        wrap_xpath_fn!(month_from_date),
-        wrap_xpath_fn!(day_from_date),
-        wrap_xpath_fn!(timezone_from_date),
-        wrap_xpath_fn!(hours_from_time),
-        wrap_xpath_fn!(minutes_from_time),
-        wrap_xpath_fn!(seconds_from_time),
-        wrap_xpath_fn!(timezone_from_time),
-        wrap_xpath_fn!(adjust_date_time_to_timezone1),
-        wrap_xpath_fn!(adjust_date_time_to_timezone2),
-        wrap_xpath_fn!(adjust_date_to_timezone1),
-        wrap_xpath_fn!(adjust_date_to_timezone2),
-        wrap_xpath_fn!(adjust_time_to_timezone1),
-        wrap_xpath_fn!(adjust_time_to_timezone2),
-        wrap_xpath_fn!(parse_ietf_date),
+        wrap_xpath_fn!(date_time, S),
+        wrap_xpath_fn!(year_from_date_time, S),
+        wrap_xpath_fn!(month_from_date_time, S),
+        wrap_xpath_fn!(day_from_date_time, S),
+        wrap_xpath_fn!(hours_from_date_time, S),
+        wrap_xpath_fn!(minutes_from_date_time, S),
+        wrap_xpath_fn!(seconds_from_date_time, S),
+        wrap_xpath_fn!(timezone_from_date_time, S),
+        wrap_xpath_fn!(year_from_date, S),
+        wrap_xpath_fn!(month_from_date, S),
+        wrap_xpath_fn!(day_from_date, S),
+        wrap_xpath_fn!(timezone_from_date, S),
+        wrap_xpath_fn!(hours_from_time, S),
+        wrap_xpath_fn!(minutes_from_time, S),
+        wrap_xpath_fn!(seconds_from_time, S),
+        wrap_xpath_fn!(timezone_from_time, S),
+        wrap_xpath_fn!(adjust_date_time_to_timezone1, S),
+        wrap_xpath_fn!(adjust_date_time_to_timezone2, S),
+        wrap_xpath_fn!(adjust_date_to_timezone1, S),
+        wrap_xpath_fn!(adjust_date_to_timezone2, S),
+        wrap_xpath_fn!(adjust_time_to_timezone1, S),
+        wrap_xpath_fn!(adjust_time_to_timezone2, S),
+        wrap_xpath_fn!(parse_ietf_date, S),
     ]
 }

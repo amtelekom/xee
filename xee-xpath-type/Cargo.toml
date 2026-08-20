@@ -14,10 +14,15 @@ homepage = "https://github.com/Paligo/xee"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-serde = ["dep:serde", "xot/serde"]
+serde = [
+    "dep:serde",
+    "xee-datasource/serde"
+    #"xot/serde"
+]
 
 [dependencies]
 xee-schema-type = { path = "../xee-schema-type", version = "0.1.4" }
 xee-name = { path = "../xee-name", version = "0.1.5" }
-xot = { workspace = true }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }
 serde = { workspace = true, features = ["derive"], optional = true }
+derive-where = "1.6.0"

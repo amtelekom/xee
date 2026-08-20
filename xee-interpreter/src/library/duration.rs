@@ -1,4 +1,4 @@
-// https://www.w3.org/TR/xpath-functions-31/#durations
+//! https://www.w3.org/TR/xpath-functions-31/#durations
 
 use ibig::IBig;
 use rust_decimal::Decimal;
@@ -6,6 +6,7 @@ use xee_xpath_macros::xpath_fn;
 
 use crate::atomic::Duration;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("fn:years-from-duration($arg as xs:duration?) as xs:integer?")]
@@ -67,13 +68,13 @@ fn seconds_from_duration(arg: Option<Duration>) -> Option<Decimal> {
     }
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(years_from_duration),
-        wrap_xpath_fn!(months_from_duration),
-        wrap_xpath_fn!(days_from_duration),
-        wrap_xpath_fn!(hours_from_duration),
-        wrap_xpath_fn!(minutes_from_duration),
-        wrap_xpath_fn!(seconds_from_duration),
+        wrap_xpath_fn!(years_from_duration, S),
+        wrap_xpath_fn!(months_from_duration, S),
+        wrap_xpath_fn!(days_from_duration, S),
+        wrap_xpath_fn!(hours_from_duration, S),
+        wrap_xpath_fn!(minutes_from_duration, S),
+        wrap_xpath_fn!(seconds_from_duration, S),
     ]
 }

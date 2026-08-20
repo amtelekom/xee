@@ -1,6 +1,7 @@
 use rust_decimal::Decimal;
 use strum::{EnumDiscriminants, EnumString, VariantNames};
 
+use xee_datasource::Span as SourceSpan;
 pub use xee_name::Name;
 use xee_xpath_ast::ast as xpath_ast;
 
@@ -26,8 +27,8 @@ impl Span {
     }
 }
 
-impl From<&xot::Span> for Span {
-    fn from(span: &xot::Span) -> Self {
+impl From<&SourceSpan> for Span {
+    fn from(span: &SourceSpan) -> Self {
         Self {
             start: span.start,
             end: span.end,

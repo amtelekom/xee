@@ -5,7 +5,6 @@ use crate::error::render_error;
 use anyhow::Context;
 use clap::Parser;
 use xee_interpreter::sequence::SerializationParameters;
-use xot::Xot;
 
 #[derive(Debug, Parser)]
 pub(crate) struct Xslt {
@@ -34,7 +33,7 @@ impl Xslt {
         let xml = input_xml(&self.infile)?;
 
         // Perform the XSLT transformation
-        let mut xot = Xot::new();
+        let mut xot = xot::Xot::new();
         let result = match xee_xslt_compiler::evaluate(&mut xot, &xml, &stylesheet) {
             Ok(result) => result,
             Err(e) => {

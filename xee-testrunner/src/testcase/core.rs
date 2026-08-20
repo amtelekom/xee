@@ -2,6 +2,7 @@ use ahash::{HashMap, HashMapExt};
 use iri_string::types::IriAbsoluteStr;
 use xee_xpath::{context, Item, Queries, Query, Sequence};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::{
     catalog::{Catalog, LoadContext},
@@ -25,7 +26,7 @@ pub(crate) trait Runnable<L: Language>: std::marker::Sized {
         test_set: &TestSet<L>,
     ) -> TestOutcome;
 
-    fn load(queries: &Queries, context: &LoadContext) -> anyhow::Result<impl Query<Self>>;
+    fn load(queries: &Queries, context: &LoadContext) -> anyhow::Result<impl Query<Self, Xot>>;
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -92,7 +93,7 @@ impl<L: Language> TestCase<L> {
         catalog: &Catalog<L>,
         test_test: &TestSet<L>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> anyhow::Result<HashMap<String, Sequence>> {
+    ) -> anyhow::Result<HashMap<String, Sequence<::xot::Node>>> {
         let mut collections = HashMap::new();
         let environments = self
             .environments(catalog, test_test)
@@ -113,7 +114,7 @@ impl<L: Language> TestCase<L> {
         catalog: &Catalog<L>,
         test_set: &TestSet<L>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> anyhow::Result<Option<Item>> {
+    ) -> anyhow::Result<Option<Item<::xot::Node>>> {
         let environments = self
             .environments(catalog, test_set)
             .collect::<std::result::Result<Vec<_>, crate::error::Error>>()?;
@@ -134,11 +135,11 @@ impl<L: Language> TestCase<L> {
         catalog: &Catalog<L>,
         test_set: &TestSet<L>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> anyhow::Result<context::Variables> {
+    ) -> anyhow::Result<context::Variables<Xot>> {
         let environments = self
             .environments(catalog, test_set)
             .collect::<std::result::Result<Vec<_>, crate::error::Error>>()?;
-        let mut variables = context::Variables::new();
+        let mut variables = context::Variables::<Xot>::new();
         for environment in environments {
             variables.extend(
                 environment
@@ -160,7 +161,7 @@ impl<L: Language> ContextLoadable<LoadContext> for TestCase<L> {
     fn load_with_context(
         queries: &Queries,
         context: &LoadContext,
-    ) -> anyhow::Result<impl Query<Self>> {
+    ) -> anyhow::Result<impl Query<Self, Xot>> {
         let name_query = queries.one("@name/string()", convert_string)?;
         let metadata_query = Metadata::load_with_context(queries, context)?;
 

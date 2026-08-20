@@ -1,9 +1,10 @@
-// https://www.w3.org/TR/xpath-functions-31/#array-functions
+//! https://www.w3.org/TR/xpath-functions-31/#array-functions
 
 use std::rc::Rc;
 
 use ibig::IBig;
 
+use xee_datasource::XmlNode;
 use xee_xpath_macros::xpath_fn;
 
 use crate::atomic;
@@ -11,13 +12,17 @@ use crate::context;
 use crate::error;
 use crate::function;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::sequence;
 use crate::string::Collation;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("array:get($array as array(*), $position as xs:integer) as item()*")]
-fn get(array: function::Array, position: IBig) -> error::Result<sequence::Sequence> {
+fn get<N: XmlNode>(
+    array: function::Array<N>,
+    position: IBig,
+) -> error::Result<sequence::Sequence<N>> {
     let position = convert_position(position)?;
     let item = array
         .index(position as usize)
@@ -26,29 +31,35 @@ fn get(array: function::Array, position: IBig) -> error::Result<sequence::Sequen
 }
 
 #[xpath_fn("array:size($array as array(*)) as xs:integer")]
-fn size(array: function::Array) -> IBig {
+fn size<N: XmlNode>(array: function::Array<N>) -> IBig {
     array.len().into()
 }
 
 #[xpath_fn(
     "array:put($array as array(*), $position as xs:integer, $member as item()*) as array(*)"
 )]
-fn put(
-    array: function::Array,
+fn put<N: XmlNode>(
+    array: function::Array<N>,
     position: IBig,
-    member: &sequence::Sequence,
-) -> error::Result<function::Array> {
+    member: &sequence::Sequence<N>,
+) -> error::Result<function::Array<N>> {
     let position = convert_position(position)?;
     array.put(position, member).ok_or(error::Error::FOAY0001)
 }
 
 #[xpath_fn("array:append($array as array(*), $appendage as item()*) as array(*)")]
-fn append(array: function::Array, appendage: &sequence::Sequence) -> function::Array {
+fn append<N: XmlNode>(
+    array: function::Array<N>,
+    appendage: &sequence::Sequence<N>,
+) -> function::Array<N> {
     array.append(appendage)
 }
 
 #[xpath_fn("array:subarray($array as array(*), $start as xs:integer) as array(*)")]
-fn subarray2(array: function::Array, start: IBig) -> error::Result<function::Array> {
+fn subarray2<N: XmlNode>(
+    array: function::Array<N>,
+    start: IBig,
+) -> error::Result<function::Array<N>> {
     let start = convert_position(start)?;
     let length = array.len() - start;
     array.subarray(start, length).ok_or(error::Error::FOAY0001)
@@ -57,17 +68,21 @@ fn subarray2(array: function::Array, start: IBig) -> error::Result<function::Arr
 #[xpath_fn(
     "array:subarray($array as array(*), $start as xs:integer, $length as xs:integer) as array(*)"
 )]
-fn subarray3(array: function::Array, start: IBig, length: IBig) -> error::Result<function::Array> {
+fn subarray3<N: XmlNode>(
+    array: function::Array<N>,
+    start: IBig,
+    length: IBig,
+) -> error::Result<function::Array<N>> {
     let start = convert_position(start)?;
     let length = convert_length(length)?;
     array.subarray(start, length).ok_or(error::Error::FOAY0001)
 }
 
 #[xpath_fn("array:remove($array as array(*), $positions as xs:integer*) as array(*)")]
-fn remove(
-    array: function::Array,
+fn remove<N: XmlNode>(
+    array: function::Array<N>,
     positions: impl Iterator<Item = error::Result<IBig>>,
-) -> error::Result<function::Array> {
+) -> error::Result<function::Array<N>> {
     let positions = positions
         .map(|position| convert_position(position?.clone()))
         .collect::<error::Result<Vec<usize>>>()?;
@@ -77,11 +92,11 @@ fn remove(
 }
 
 #[xpath_fn("array:insert-before($array as array(*), $position as xs:integer, $member as item()*) as array(*)")]
-fn insert_before(
-    array: function::Array,
+fn insert_before<N: XmlNode>(
+    array: function::Array<N>,
     position: IBig,
-    member: &sequence::Sequence,
-) -> error::Result<function::Array> {
+    member: &sequence::Sequence<N>,
+) -> error::Result<function::Array<N>> {
     let position = convert_position(position)?;
     array
         .insert_before(position, member)
@@ -89,13 +104,13 @@ fn insert_before(
 }
 
 #[xpath_fn("array:head($array as array(*)) as item()*")]
-fn head(array: function::Array) -> error::Result<sequence::Sequence> {
+fn head<N: XmlNode>(array: function::Array<N>) -> error::Result<sequence::Sequence<N>> {
     let item = array.index(0).ok_or(error::Error::FOAY0001)?;
     Ok(item.clone())
 }
 
 #[xpath_fn("array:tail($array as array(*)) as item()*")]
-fn tail(array: function::Array) -> error::Result<function::Array> {
+fn tail<N: XmlNode>(array: function::Array<N>) -> error::Result<function::Array<N>> {
     if !array.is_empty() {
         array
             .subarray(1, array.len() - 1)
@@ -106,26 +121,26 @@ fn tail(array: function::Array) -> error::Result<function::Array> {
 }
 
 #[xpath_fn("array:reverse($array as array(*)) as array(*)")]
-fn reverse(array: function::Array) -> function::Array {
+fn reverse<N: XmlNode>(array: function::Array<N>) -> function::Array<N> {
     array.reversed()
 }
 
 #[xpath_fn("array:join($arrays as array(*)*) as array(*)")]
-fn join(
-    arrays: impl Iterator<Item = error::Result<function::Array>>,
-) -> error::Result<function::Array> {
-    let arrays = arrays.collect::<error::Result<Vec<function::Array>>>()?;
+fn join<N: XmlNode>(
+    arrays: impl Iterator<Item = error::Result<function::Array<N>>>,
+) -> error::Result<function::Array<N>> {
+    let arrays = arrays.collect::<error::Result<Vec<function::Array<N>>>>()?;
     Ok(function::Array::join(&arrays))
 }
 
 #[xpath_fn(
     "array:for-each($array as array(*), $action as function(item()*) as item()*) as array(*)"
 )]
-fn for_each(
-    interpreter: &mut Interpreter,
-    array: function::Array,
-    action: sequence::Item,
-) -> error::Result<function::Array> {
+fn for_each<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
+    array: function::Array<S::Node>,
+    action: sequence::Item<S::Node>,
+) -> error::Result<function::Array<S::Node>> {
     let function = action.to_function()?;
     let mut result = Vec::with_capacity(array.len());
     for sequence in array.iter() {
@@ -139,11 +154,11 @@ fn for_each(
 #[xpath_fn(
     "array:filter($array as array(*), $function as function(item()*) as xs:boolean) as array(*)"
 )]
-fn filter(
-    interpreter: &mut Interpreter,
-    array: function::Array,
-    function: sequence::Item,
-) -> error::Result<function::Array> {
+fn filter<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
+    array: function::Array<S::Node>,
+    function: sequence::Item<S::Node>,
+) -> error::Result<function::Array<S::Node>> {
     let function = function.to_function()?;
     let mut result = Vec::with_capacity(array.len());
     for sequence in array.iter() {
@@ -159,12 +174,12 @@ fn filter(
 }
 
 #[xpath_fn("array:fold-left($array as array(*), $zero as item()*, $function as function(item()*, item()*) as item()*) as item()*")]
-fn fold_left(
-    interpreter: &mut Interpreter,
-    array: function::Array,
-    zero: &sequence::Sequence,
-    function: sequence::Item,
-) -> error::Result<sequence::Sequence> {
+fn fold_left<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
+    array: function::Array<S::Node>,
+    zero: &sequence::Sequence<S::Node>,
+    function: sequence::Item<S::Node>,
+) -> error::Result<sequence::Sequence<S::Node>> {
     let function = function.to_function()?;
 
     let mut accumulator = zero.clone();
@@ -176,12 +191,12 @@ fn fold_left(
 }
 
 #[xpath_fn("array:fold-right($array as array(*), $zero as item()*, $function as function(item()*, item()*) as item()*) as item()*")]
-fn fold_right(
-    interpreter: &mut Interpreter,
-    array: function::Array,
-    zero: &sequence::Sequence,
-    function: sequence::Item,
-) -> error::Result<sequence::Sequence> {
+fn fold_right<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
+    array: function::Array<S::Node>,
+    zero: &sequence::Sequence<S::Node>,
+    function: sequence::Item<S::Node>,
+) -> error::Result<sequence::Sequence<S::Node>> {
     let function = function.to_function()?;
 
     let mut accumulator = zero.clone();
@@ -193,12 +208,12 @@ fn fold_right(
 }
 
 #[xpath_fn("array:for-each-pair($array1 as array(*), $array2 as array(*), $function as function(item()*, item()*) as item()*) as array(*)")]
-fn for_each_pair(
-    interpreter: &mut Interpreter,
-    array1: function::Array,
-    array2: function::Array,
-    function: sequence::Item,
-) -> error::Result<function::Array> {
+fn for_each_pair<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
+    array1: function::Array<S::Node>,
+    array2: function::Array<S::Node>,
+    function: sequence::Item<S::Node>,
+) -> error::Result<function::Array<S::Node>> {
     let function = function.to_function()?;
 
     let mut result = Vec::with_capacity(array1.len().min(array2.len()));
@@ -212,35 +227,35 @@ fn for_each_pair(
 }
 
 #[xpath_fn("array:sort($array as array(*)) as array(*)")]
-fn sort1(
-    context: &context::DynamicContext,
-    interpreter: &Interpreter,
-    input: function::Array,
-) -> error::Result<function::Array> {
+fn sort1<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &Interpreter<S>,
+    input: function::Array<S::Node>,
+) -> error::Result<function::Array<S::Node>> {
     let collation = context.static_context().default_collation()?;
     sort_without_key(context, interpreter, input, collation)
 }
 
 #[xpath_fn("array:sort($array as array(*), $collation as xs:string?) as array(*)")]
-fn sort2(
-    context: &context::DynamicContext,
-    interpreter: &Interpreter,
-    input: function::Array,
+fn sort2<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &Interpreter<S>,
+    input: function::Array<S::Node>,
     collation: Option<&str>,
-) -> error::Result<function::Array> {
+) -> error::Result<function::Array<S::Node>> {
     let collation = context.static_context().resolve_collation_str(collation)?;
 
     sort_without_key(context, interpreter, input, collation)
 }
 
 #[xpath_fn("array:sort($array as array(*), $collation as xs:string?, $key as function(item()*) as xs:anyAtomicType*) as array(*)")]
-fn sort3(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
-    input: function::Array,
+fn sort3<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
+    input: function::Array<S::Node>,
     collation: Option<&str>,
-    key: sequence::Item,
-) -> error::Result<function::Array> {
+    key: sequence::Item<S::Node>,
+) -> error::Result<function::Array<S::Node>> {
     let collation = context.static_context().resolve_collation_str(collation)?;
     let function = key.to_function()?;
     sort_by_sequence(context, input, collation, |sequence| {
@@ -250,29 +265,29 @@ fn sort3(
     })
 }
 
-fn sort_without_key(
-    context: &context::DynamicContext,
-    interpreter: &Interpreter,
-    input: function::Array,
+fn sort_without_key<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &Interpreter<S>,
+    input: function::Array<S::Node>,
     collation: Rc<Collation>,
-) -> error::Result<function::Array> {
+) -> error::Result<function::Array<S::Node>> {
     sort_by_sequence(context, input, collation, |sequence| {
         // the sequivalent of fn:data()
         let atoms = sequence
-            .atomized(interpreter.xot())
+            .atomized(interpreter.source())
             .collect::<error::Result<Vec<_>>>()?;
         Ok(atoms.into())
     })
 }
 
-fn sort_by_sequence<F>(
-    context: &context::DynamicContext,
-    input: function::Array,
+fn sort_by_sequence<S: XmlDS, F>(
+    context: &context::DynamicContext<S>,
+    input: function::Array<S::Node>,
     collation: Rc<Collation>,
     mut get: F,
-) -> error::Result<function::Array>
+) -> error::Result<function::Array<S::Node>>
 where
-    F: FnMut(&sequence::Sequence) -> error::Result<sequence::Sequence>,
+    F: FnMut(&sequence::Sequence<S::Node>) -> error::Result<sequence::Sequence<S::Node>>,
 {
     // see also sort_by_sequence in hof.rs. The signatures are sufficiently
     // different we don't want to try to unify them.
@@ -306,7 +321,7 @@ where
 }
 
 #[xpath_fn("array:flatten($input as item()*) as item()*")]
-fn flatten(input: &sequence::Sequence) -> error::Result<sequence::Sequence> {
+fn flatten<N: XmlNode>(input: &sequence::Sequence<N>) -> error::Result<sequence::Sequence<N>> {
     input.flatten()
 }
 
@@ -328,28 +343,28 @@ fn convert_length(length: IBig) -> error::Result<usize> {
     Ok(length)
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(get),
-        wrap_xpath_fn!(size),
-        wrap_xpath_fn!(put),
-        wrap_xpath_fn!(append),
-        wrap_xpath_fn!(subarray2),
-        wrap_xpath_fn!(subarray3),
-        wrap_xpath_fn!(remove),
-        wrap_xpath_fn!(insert_before),
-        wrap_xpath_fn!(head),
-        wrap_xpath_fn!(tail),
-        wrap_xpath_fn!(reverse),
-        wrap_xpath_fn!(join),
-        wrap_xpath_fn!(for_each),
-        wrap_xpath_fn!(filter),
-        wrap_xpath_fn!(fold_left),
-        wrap_xpath_fn!(fold_right),
-        wrap_xpath_fn!(for_each_pair),
-        wrap_xpath_fn!(sort1),
-        wrap_xpath_fn!(sort2),
-        wrap_xpath_fn!(sort3),
-        wrap_xpath_fn!(flatten),
+        wrap_xpath_fn!(get, S),
+        wrap_xpath_fn!(size, S),
+        wrap_xpath_fn!(put, S),
+        wrap_xpath_fn!(append, S),
+        wrap_xpath_fn!(subarray2, S),
+        wrap_xpath_fn!(subarray3, S),
+        wrap_xpath_fn!(remove, S),
+        wrap_xpath_fn!(insert_before, S),
+        wrap_xpath_fn!(head, S),
+        wrap_xpath_fn!(tail, S),
+        wrap_xpath_fn!(reverse, S),
+        wrap_xpath_fn!(join, S),
+        wrap_xpath_fn!(for_each, S),
+        wrap_xpath_fn!(filter, S),
+        wrap_xpath_fn!(fold_left, S),
+        wrap_xpath_fn!(fold_right, S),
+        wrap_xpath_fn!(for_each_pair, S),
+        wrap_xpath_fn!(sort1, S),
+        wrap_xpath_fn!(sort2, S),
+        wrap_xpath_fn!(sort3, S),
+        wrap_xpath_fn!(flatten, S),
     ]
 }

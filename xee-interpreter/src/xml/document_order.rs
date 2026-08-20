@@ -19,7 +19,7 @@
 use std::cell::RefCell;
 
 use ahash::{HashMap, HashMapExt};
-use xot::Xot;
+use xee_datasource::XmlDS;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub(crate) struct DocumentOrder(usize, usize);
@@ -32,29 +32,32 @@ impl DocumentOrder {
     }
 }
 
-pub(crate) struct DocumentOrderAccess<'a> {
-    pub(crate) xot: &'a Xot,
-    pub(crate) annotations: &'a DocumentOrderAnnotations,
+pub(crate) struct DocumentOrderAccess<'a, S: XmlDS> {
+    pub(crate) source: &'a S,
+    pub(crate) annotations: &'a DocumentOrderAnnotations<S>,
 }
 
-impl<'a> DocumentOrderAccess<'a> {
-    pub(crate) fn new(xot: &'a Xot, annotations: &'a DocumentOrderAnnotations) -> Self {
-        Self { xot, annotations }
+impl<'a, S: XmlDS> DocumentOrderAccess<'a, S> {
+    pub(crate) fn new(source: &'a S, annotations: &'a DocumentOrderAnnotations<S>) -> Self {
+        Self {
+            source,
+            annotations,
+        }
     }
 
-    pub(crate) fn get(&self, node: xot::Node) -> DocumentOrder {
-        self.annotations.get(node, self.xot)
+    pub(crate) fn get(&self, node: S::Node) -> DocumentOrder {
+        self.annotations.get(node, self.source)
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DocumentOrderAnnotations {
+pub(crate) struct DocumentOrderAnnotations<S: XmlDS> {
     // each document has a different id, so track this
     document_id: RefCell<usize>,
-    map: RefCell<HashMap<xot::Node, DocumentOrder>>,
+    map: RefCell<HashMap<S::Node, DocumentOrder>>,
 }
 
-impl DocumentOrderAnnotations {
+impl<S: XmlDS> DocumentOrderAnnotations<S> {
     pub(crate) fn new() -> Self {
         Self {
             map: RefCell::new(HashMap::new()),
@@ -62,24 +65,24 @@ impl DocumentOrderAnnotations {
         }
     }
 
-    pub(crate) fn access<'a>(&'a self, xot: &'a Xot) -> DocumentOrderAccess<'a> {
-        DocumentOrderAccess::new(xot, self)
+    pub(crate) fn access<'a>(&'a self, source: &'a S) -> DocumentOrderAccess<'a, S> {
+        DocumentOrderAccess::new(source, self)
     }
 
-    pub(crate) fn get(&self, node: xot::Node, xot: &xot::Xot) -> DocumentOrder {
+    pub(crate) fn get(&self, node: S::Node, source: &S) -> DocumentOrder {
         let document_order = self.map.borrow().get(&node).cloned();
         if let Some(document_order) = document_order {
             document_order
         } else {
             let (document_order, found_node) =
-                find_node_with_document_order(&self.map.borrow(), node, xot);
+                find_node_with_document_order(&self.map.borrow(), node, source);
             if let Some(document_order) = document_order {
                 annotation_with_document_order(
                     &mut self.map.borrow_mut(),
                     document_order,
                     found_node,
                     node,
-                    xot,
+                    source,
                 )
             } else {
                 // if we increment document id, we should end up at
@@ -91,7 +94,7 @@ impl DocumentOrderAnnotations {
                 let mut map = self.map.borrow_mut();
                 map.insert(found_node, document_order);
                 // now create annotations for everything up to node
-                annotation_with_document_order(&mut map, document_order, found_node, node, xot)
+                annotation_with_document_order(&mut map, document_order, found_node, node, source)
             }
         }
     }
@@ -99,13 +102,13 @@ impl DocumentOrderAnnotations {
 
 // this always returns a node; either it's the first node that has a document order
 // annotation, or alternatively it's the root node without annotation
-fn find_node_with_document_order(
-    map: &HashMap<xot::Node, DocumentOrder>,
-    node: xot::Node,
-    xot: &xot::Xot,
-) -> (Option<DocumentOrder>, xot::Node) {
+fn find_node_with_document_order<S: XmlDS>(
+    map: &HashMap<S::Node, DocumentOrder>,
+    node: S::Node,
+    source: &S,
+) -> (Option<DocumentOrder>, S::Node) {
     let mut last_node = node;
-    for node in xot.all_reverse_preorder(node) {
+    for node in source.all_reverse_preorder(node) {
         // if we find a node that already has an annotation,
         // we're done
         if let Some(document_order) = map.get(&node) {
@@ -116,12 +119,12 @@ fn find_node_with_document_order(
     (None, last_node)
 }
 
-fn annotation_with_document_order(
-    map: &mut HashMap<xot::Node, DocumentOrder>,
+fn annotation_with_document_order<S: XmlDS>(
+    map: &mut HashMap<S::Node, DocumentOrder>,
     document_order: DocumentOrder,
-    root_node: xot::Node,
-    node: xot::Node,
-    xot: &Xot,
+    root_node: S::Node,
+    node: S::Node,
+    source: &S,
 ) -> DocumentOrder {
     if root_node == node {
         // if the root node is the same as the node, we can just return
@@ -131,9 +134,9 @@ fn annotation_with_document_order(
     // we know the document order to start with
     let document_id = document_order.0;
     // we need to visit all descendants, then all following nodes
-    let mut iter = xot
+    let mut iter = source
         .all_descendants(root_node)
-        .chain(xot.all_following(root_node));
+        .chain(source.all_following(root_node));
     // we don't need to revisit the root node itself
     iter.next();
     // so we start one beyond the previous document order

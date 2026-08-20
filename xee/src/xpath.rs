@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use xee_xpath::context::StaticContextBuilder;
 use xee_xpath::Itemable;
 use xee_xpath::Query;
+use xot::Xot;
 
 #[derive(Debug, Parser)]
 pub(crate) struct XPath {
@@ -29,7 +30,7 @@ impl XPath {
     pub(crate) fn run(&self) -> Result<(), anyhow::Error> {
         let input_xml = input_xml(&self.infile)?;
 
-        let mut documents = xee_xpath::Documents::new();
+        let mut documents = xee_xpath::Documents::new(Xot::new());
         let doc = documents.add_string_without_uri(&input_xml)?;
 
         let static_context_builder = make_static_context_builder(
@@ -45,7 +46,7 @@ impl XPath {
 pub(crate) fn execute_query(
     xpath: &str,
     queries: &xee_xpath::Queries<'_>,
-    documents: &mut xee_xpath::Documents,
+    documents: &mut xee_xpath::Documents<Xot>,
     doc: Option<xee_xpath::DocumentHandle>,
 ) -> Result<(), anyhow::Error> {
     let sequence_query = queries.sequence(xpath);
@@ -72,7 +73,7 @@ pub(crate) fn execute_query(
     };
     println!(
         "{}",
-        sequence.display_representation(documents.xot(), &context)
+        sequence.display_representation(documents.source(), &context)
     );
     Ok(())
 }

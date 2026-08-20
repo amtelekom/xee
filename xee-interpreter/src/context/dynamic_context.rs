@@ -2,9 +2,10 @@ use ahash::{AHashMap, HashMap};
 use iri_string::types::{IriStr, IriString};
 use std::fmt::Debug;
 
-use crate::function::{self, Function};
+use crate::function::{self, Function, XmlDS};
 use crate::{error::Error, interpreter::Program};
 use crate::{interpreter, sequence};
+use xee_datasource::xmlname::OwnedName;
 
 use super::{DocumentsRef, StaticContext};
 
@@ -13,48 +14,49 @@ use super::{DocumentsRef, StaticContext};
 /// These are variables to be passed into an XPath evaluation.
 ///
 /// The key is the name of a variable, and the value is an item.
-pub type Variables = AHashMap<xot::xmlname::OwnedName, sequence::Sequence>;
+#[allow(type_alias_bounds)] //not enforced, but needed for the associated type
+pub type Variables<S: XmlDS> = AHashMap<OwnedName, sequence::Sequence<S::Node>>;
 
 // a dynamic context is created for each xpath evaluation
 #[derive(Debug)]
-pub struct DynamicContext<'a> {
+pub struct DynamicContext<'a, S: XmlDS> {
     // we keep a reference to the program
-    program: &'a Program,
+    program: &'a Program<S>,
 
     /// An optional context item
-    context_item: Option<sequence::Item>,
+    context_item: Option<sequence::Item<S::Node>>,
     // we want to mutate documents during evaluation, and this happens in
     // multiple spots. We use RefCell to manage that during runtime so we don't
     // need to make the whole thing immutable.
-    documents: DocumentsRef,
-    variables: Variables,
+    documents: DocumentsRef<S>,
+    variables: Variables<S>,
     // TODO: we want to be able to control the creation of this outside,
     // as it needs to be the same for all evalutions of XSLT I believe
     current_datetime: chrono::DateTime<chrono::offset::FixedOffset>,
     // default collection
-    default_collection: Option<sequence::Sequence>,
+    default_collection: Option<sequence::Sequence<S::Node>>,
     // collections
-    collections: HashMap<IriString, sequence::Sequence>,
+    collections: HashMap<IriString, sequence::Sequence<S::Node>>,
     // default uri collection
-    default_uri_collection: Option<sequence::Sequence>,
+    default_uri_collection: Option<sequence::Sequence<S::Node>>,
     // uri collections
-    uri_collections: HashMap<IriString, sequence::Sequence>,
+    uri_collections: HashMap<IriString, sequence::Sequence<S::Node>>,
     // environment variables
     environment_variables: HashMap<String, String>,
 }
 
-impl<'a> DynamicContext<'a> {
+impl<'a, S: XmlDS> DynamicContext<'a, S> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        program: &'a Program,
-        context_item: Option<sequence::Item>,
-        documents: DocumentsRef,
-        variables: Variables,
+        program: &'a Program<S>,
+        context_item: Option<sequence::Item<S::Node>>,
+        documents: DocumentsRef<S>,
+        variables: Variables<S>,
         current_datetime: chrono::DateTime<chrono::offset::FixedOffset>,
-        default_collection: Option<sequence::Sequence>,
-        collections: HashMap<IriString, sequence::Sequence>,
-        default_uri_collection: Option<sequence::Sequence>,
-        uri_collections: HashMap<IriString, sequence::Sequence>,
+        default_collection: Option<sequence::Sequence<S::Node>>,
+        collections: HashMap<IriString, sequence::Sequence<S::Node>>,
+        default_uri_collection: Option<sequence::Sequence<S::Node>>,
+        uri_collections: HashMap<IriString, sequence::Sequence<S::Node>>,
         environment_variables: HashMap<String, String>,
     ) -> Self {
         Self {
@@ -72,37 +74,37 @@ impl<'a> DynamicContext<'a> {
     }
 
     /// The static context of the program.
-    pub fn static_context(&self) -> &StaticContext {
+    pub fn static_context(&self) -> &StaticContext<S> {
         self.program.static_context()
     }
 
     /// Access the context item, if any.
-    pub fn context_item(&self) -> Option<&sequence::Item> {
+    pub fn context_item(&self) -> Option<&sequence::Item<S::Node>> {
         self.context_item.as_ref()
     }
 
     /// The documents in this context.
-    pub fn documents(&self) -> DocumentsRef {
+    pub fn documents(&self) -> DocumentsRef<S> {
         self.documents.clone()
     }
 
     /// The variables in this context.
-    pub fn variables(&self) -> &Variables {
+    pub fn variables(&self) -> &Variables<S> {
         &self.variables
     }
 
     /// Access the default collection
-    pub fn default_collection(&self) -> Option<&sequence::Sequence> {
+    pub fn default_collection(&self) -> Option<&sequence::Sequence<S::Node>> {
         self.default_collection.as_ref()
     }
 
     /// Access a collection by URI
-    pub fn collection(&self, uri: &IriStr) -> Option<&sequence::Sequence> {
+    pub fn collection(&self, uri: &IriStr) -> Option<&sequence::Sequence<S::Node>> {
         self.collections.get(uri)
     }
 
     /// Access the default URI collection
-    pub fn default_uri_collection(&self) -> Option<&sequence::Sequence> {
+    pub fn default_uri_collection(&self) -> Option<&sequence::Sequence<S::Node>> {
         self.default_uri_collection.as_ref()
     }
 
@@ -110,7 +112,7 @@ impl<'a> DynamicContext<'a> {
     ///
     /// Note that the URI does not have to be a proper URI as the specification
     /// defines it as an xs:string
-    pub fn uri_collection(&self, uri: &IriStr) -> Option<&sequence::Sequence> {
+    pub fn uri_collection(&self, uri: &IriStr) -> Option<&sequence::Sequence<S::Node>> {
         self.uri_collections.get(uri)
     }
 
@@ -124,7 +126,7 @@ impl<'a> DynamicContext<'a> {
         self.environment_variables.keys().map(String::as_str)
     }
 
-    pub(crate) fn arguments(&self) -> Result<Vec<sequence::Sequence>, Error> {
+    pub(crate) fn arguments(&self) -> Result<Vec<sequence::Sequence<S::Node>>, Error> {
         let mut arguments = Vec::new();
         for variable_name in self.static_context().variable_names() {
             let items = self.variables.get(variable_name).ok_or(Error::XPDY0002)?;
@@ -146,21 +148,24 @@ impl<'a> DynamicContext<'a> {
     }
 
     /// Access information about a Function.
-    pub fn function_info<'b>(&self, function: &'b Function) -> interpreter::FunctionInfo<'a, 'b> {
+    pub fn function_info<'b>(
+        &self,
+        function: &'b Function<S::Node>,
+    ) -> interpreter::FunctionInfo<'a, 'b, S> {
         self.program.function_info(function)
     }
 
     pub(crate) fn static_function_by_id(
         &self,
         id: function::StaticFunctionId,
-    ) -> &function::StaticFunction {
+    ) -> &function::StaticFunction<S> {
         self.program.static_context().function_by_id(id)
     }
 
     pub(crate) fn inline_function_by_id(
         &self,
         id: function::InlineFunctionId,
-    ) -> &function::InlineFunction {
+    ) -> &function::InlineFunction<S> {
         self.program.inline_function(id)
     }
 }

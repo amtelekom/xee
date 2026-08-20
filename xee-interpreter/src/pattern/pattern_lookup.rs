@@ -1,7 +1,7 @@
 use xee_xpath_ast::Pattern;
-use xot::Xot;
 
 use crate::function;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::pattern::pattern_core::PredicateMatcher;
 use crate::sequence::Item;
@@ -11,30 +11,30 @@ pub struct PatternLookup<V: Clone> {
     pub(crate) patterns: Vec<(Pattern<function::InlineFunctionId>, V)>,
 }
 
-pub(crate) struct InterpreterPredicateMatcher<'a> {
-    interpreter: &'a mut Interpreter<'a>,
+pub(crate) struct InterpreterPredicateMatcher<'a, S: XmlDS> {
+    interpreter: &'a mut Interpreter<'a, S>,
 }
 
-impl<'a> InterpreterPredicateMatcher<'a> {
-    pub(crate) fn new(interpreter: &'a mut Interpreter<'a>) -> Self {
+impl<'a, S: XmlDS> InterpreterPredicateMatcher<'a, S> {
+    pub(crate) fn new(interpreter: &'a mut Interpreter<'a, S>) -> Self {
         Self { interpreter }
     }
 }
 
-impl PredicateMatcher for Interpreter<'_> {
+impl<S: XmlDS> PredicateMatcher<S> for Interpreter<'_, S> {
     fn match_predicate(
         &mut self,
         inline_function_id: function::InlineFunctionId,
-        item: &Item,
+        item: &Item<S::Node>,
     ) -> bool {
         // TODO: extract 'call_function_id_with_arguments' that is used also by
         // apply_templates_sequence. call it with context, position and length,
         // again see apply_templates_sequence
         let function = function::InlineFunctionData::new(inline_function_id, Vec::new()).into();
         let arguments = if let Item::Node(node) = item {
-            if let Some(parent) = self.xot().parent(*node) {
-                let position = self.xot().child_index(parent, *node).unwrap() + 1;
-                let size = self.xot().children(parent).count();
+            if let Some(parent) = self.source().parent(*node) {
+                let position = self.source().child_index(parent, *node).unwrap() + 1;
+                let size = self.source().children(parent).count();
                 [
                     item.clone().into(),
                     (position as u64).into(),
@@ -57,8 +57,8 @@ impl PredicateMatcher for Interpreter<'_> {
         }
     }
 
-    fn xot(&self) -> &Xot {
-        self.xot()
+    fn source(&self) -> &S {
+        self.source()
     }
 }
 

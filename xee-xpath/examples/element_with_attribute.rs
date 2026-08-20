@@ -1,9 +1,10 @@
 use std::hint::black_box;
 
 use xee_xpath::{Documents, Queries, Query};
+use xot::Xot;
 
 fn main() {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     // large document doc with 1000 p elements where even elements have the
     // attribute state='even' and odd elements have the attribute state='odd'
     let mut doc = String::from("<doc>");

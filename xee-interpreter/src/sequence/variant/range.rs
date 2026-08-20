@@ -1,4 +1,7 @@
+use std::marker::PhantomData;
+
 use ibig::IBig;
+use xee_datasource::{XmlDS, XmlNode};
 
 use crate::atomic::AtomicCompareValue;
 use crate::error;
@@ -68,7 +71,7 @@ impl Range {
     }
 }
 
-impl<'a> SequenceCore<'a, RangeIterator> for Range {
+impl<'a, N: XmlNode> SequenceCore<'a, RangeIterator<N>, N> for Range {
     #[inline]
     fn is_empty(&self) -> bool {
         self.start == self.end
@@ -82,8 +85,8 @@ impl<'a> SequenceCore<'a, RangeIterator> for Range {
     }
 
     #[inline]
-    fn get(&self, index: usize) -> Option<Item> {
-        if index < self.len() {
+    fn get(&self, index: usize) -> Option<Item<N>> {
+        if index < SequenceCore::<'a, RangeIterator<N>, N>::len(self) {
             let i: IBig = self.start.as_ref() + index;
             Some(i.into())
         } else {
@@ -92,41 +95,48 @@ impl<'a> SequenceCore<'a, RangeIterator> for Range {
     }
 
     #[inline]
-    fn one(self) -> error::Result<Item> {
-        match self.len() {
-            0 => Err(error::Error::XPTY0004),
+    fn one(self) -> error::Result<Item<N>> {
+        match SequenceCore::<'a, RangeIterator<N>, N>::len(&self) {
+            0 => Err(error::Error::XPTY0004(
+                "Range::one called on an empty range",
+            )),
             1 => {
                 let i: IBig = self.start.as_ref().clone();
                 Ok(i.into())
             }
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Range::one called on a range with more than one item",
+            )),
         }
     }
 
     #[inline]
-    fn option(self) -> error::Result<Option<Item>> {
-        match self.len() {
+    fn option(self) -> error::Result<Option<Item<N>>> {
+        match SequenceCore::<'a, RangeIterator<N>, N>::len(&self) {
             0 => Ok(None),
             1 => {
                 let i: IBig = self.start.as_ref().clone();
                 Ok(Some(i.into()))
             }
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Range::option called on a range with more than one item",
+            )),
         }
     }
 
     #[inline]
-    fn iter(&'a self) -> RangeIterator {
+    fn iter(&'a self) -> RangeIterator<N> {
         RangeIterator {
             start: self.start.as_ref().clone(),
             end: self.end.as_ref().clone(),
             index: 0.into(),
+            _phantom: PhantomData {},
         }
     }
 
     #[inline]
     fn effective_boolean_value(&self) -> error::Result<bool> {
-        match self.len() {
+        match SequenceCore::<'a, RangeIterator<N>, N>::len(self) {
             0 => Ok(false),
             1 => Ok(true),
             _ => Err(error::Error::FORG0006),
@@ -134,33 +144,37 @@ impl<'a> SequenceCore<'a, RangeIterator> for Range {
     }
 
     #[inline]
-    fn string_value(&self, _xot: &xot::Xot) -> error::Result<String> {
-        match self.len() {
+    fn string_value<S: XmlDS<Node = N>>(&self, _source: &S) -> error::Result<String> {
+        match SequenceCore::<'a, RangeIterator<N>, N>::len(self) {
             0 => Ok(String::new()),
             1 => Ok(self.start.to_string()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Range::string_value called on a range with more than one item",
+            )),
         }
     }
 }
 
-pub struct RangeIterator {
+pub struct RangeIterator<N: XmlNode> {
     start: IBig,
     end: IBig,
     index: IBig,
+    _phantom: PhantomData<N>,
 }
 
-impl RangeIterator {
+impl<N: XmlNode> RangeIterator<N> {
     pub(crate) fn new(start: IBig, end: IBig) -> Self {
-        RangeIterator {
+        Self {
             start,
             end,
             index: 0.into(),
+            _phantom: PhantomData {},
         }
     }
 }
 
-impl Iterator for RangeIterator {
-    type Item = Item;
+impl<N: XmlNode> Iterator for RangeIterator<N> {
+    type Item = Item<N>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < (&self.end - &self.start) {
@@ -181,27 +195,29 @@ impl Iterator for RangeIterator {
     }
 }
 
-impl<'a, I> SequenceExt<'a, I> for Range
+impl<'a, I, N: XmlNode + 'a> SequenceExt<'a, I, N> for Range
 where
-    I: Iterator<Item = Item> + 'a,
-    Range: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    Range: SequenceCore<'a, I, N>,
 {
 }
 
-impl<'a, I> SequenceCompare<'a, I> for Range
+impl<'a, I, N: XmlNode + 'a> SequenceCompare<'a, I, N> for Range
 where
-    I: Iterator<Item = Item> + 'a,
-    Range: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    Range: SequenceCore<'a, I, N>,
 {
 }
 
-impl<'a, I> SequenceOrder<'a, I> for Range
+impl<'a, I, N: XmlNode + 'a> SequenceOrder<'a, I, N> for Range
 where
-    I: Iterator<Item = Item>,
-    Range: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>>,
+    Range: SequenceCore<'a, I, N>,
 {
-    fn one_node(&self) -> error::Result<xot::Node> {
+    fn one_node(&self) -> error::Result<N> {
         // a range never contains nodes
-        Err(error::Error::XPTY0004)
+        Err(error::Error::XPTY0004(
+            "Range::one_node called on a Range, which never contains nodes",
+        ))
     }
 }

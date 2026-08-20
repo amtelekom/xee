@@ -1,4 +1,6 @@
-// https://www.w3.org/TR/xpath-functions-31/#accessors
+//! https://www.w3.org/TR/xpath-functions-31/#accessors
+
+use xee_datasource::xmlname::RefName;
 use xee_xpath_ast::ast;
 use xee_xpath_macros::xpath_fn;
 
@@ -6,52 +8,65 @@ use crate::atomic;
 use crate::context;
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::sequence;
 use crate::wrap_xpath_fn;
 use crate::xml::BaseUriResolver;
 
 #[xpath_fn("fn:node-name($arg as node()?) as xs:QName?", context_first)]
-fn node_name(
-    interpreter: &Interpreter,
-    arg: Option<xot::Node>,
+fn node_name<S: XmlDS>(
+    interpreter: &Interpreter<S>,
+    arg: Option<S::Node>,
 ) -> error::Result<Option<ast::Name>> {
     Ok(if let Some(node) = arg {
-        interpreter.xot().node_name_ref(node)?.map(|n| n.to_owned())
+        interpreter
+            .source()
+            .node_name_ref(node)?
+            .map(|n| n.to_owned())
     } else {
         None
     })
 }
 
 #[xpath_fn("fn:string($arg as item()?) as xs:string", context_first)]
-fn string(interpreter: &Interpreter, arg: Option<sequence::Item>) -> error::Result<String> {
+fn string<S: XmlDS>(
+    interpreter: &Interpreter<S>,
+    arg: Option<sequence::Item<S::Node>>,
+) -> error::Result<String> {
     if let Some(arg) = arg {
-        arg.string_value(interpreter.xot())
+        arg.string_value(interpreter.source())
     } else {
         Ok("".to_string())
     }
 }
 
 #[xpath_fn("fn:data($arg as item()*) as xs:anyAtomicType*", context_first)]
-fn data(interpreter: &Interpreter, arg: &sequence::Sequence) -> error::Result<Vec<sequence::Item>> {
+fn data<S: XmlDS>(
+    interpreter: &Interpreter<S>,
+    arg: &sequence::Sequence<S::Node>,
+) -> error::Result<Vec<sequence::Item<S::Node>>> {
     let data = arg
-        .atomized(interpreter.xot())
+        .atomized(interpreter.source())
         .map(|atom| atom.map(|a| a.into()))
-        .collect::<error::Result<Vec<sequence::Item>>>()?;
+        .collect::<error::Result<Vec<sequence::Item<S::Node>>>>()?;
     Ok(data)
 }
 
 #[xpath_fn("fn:base-uri($arg as node()?) as xs:anyURI?", context_first)]
-fn base_uri(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
-    arg: Option<xot::Node>,
+fn base_uri<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
+    arg: Option<S::Node>,
 ) -> error::Result<Option<atomic::Atomic>> {
     Ok(if let Some(node) = arg {
         // root node of the document
-        let root = interpreter.xot().root(node);
+        let root = interpreter.source().root(node);
 
-        let base_uri = if matches!(interpreter.xot().value(root), xot::Value::Document) {
+        let base_uri = if matches!(
+            interpreter.source().value(root),
+            xee_datasource::ValueRef::Document
+        ) {
             // the base uri of the document is the one we can find registered, if available
             let documents = context.documents();
             let documents = documents.borrow();
@@ -67,7 +82,7 @@ fn base_uri(
                 .static_base_uri()
                 .map(|u| u.to_owned().into())
         });
-        let resolver = BaseUriResolver::new(base_uri.as_deref(), interpreter.state.xot_mut());
+        let resolver = BaseUriResolver::new(base_uri.as_deref(), interpreter.state.source_mut());
         let base_iri = resolver.base_uri(node)?;
         base_iri.map(|i| i.into())
     } else {
@@ -76,16 +91,19 @@ fn base_uri(
 }
 
 #[xpath_fn("fn:document-uri($arg as node()?) as xs:anyURI?", context_first)]
-fn document_uri(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
-    arg: Option<xot::Node>,
+fn document_uri<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
+    arg: Option<S::Node>,
 ) -> error::Result<Option<atomic::Atomic>> {
     Ok(if let Some(node) = arg {
         // root node of the document
-        let root = interpreter.xot().root(node);
+        let root = interpreter.source().root(node);
 
-        if matches!(interpreter.xot().value(root), xot::Value::Document) {
+        if matches!(
+            interpreter.source().value(root),
+            xee_datasource::ValueRef::Document
+        ) {
             // the base uri of the document is the one we can find registered, if available
             let documents = context.documents();
             let documents = documents.borrow();
@@ -99,12 +117,12 @@ fn document_uri(
     })
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(node_name),
-        wrap_xpath_fn!(string),
-        wrap_xpath_fn!(data),
-        wrap_xpath_fn!(base_uri),
-        wrap_xpath_fn!(document_uri),
+        wrap_xpath_fn!(node_name, S),
+        wrap_xpath_fn!(string, S),
+        wrap_xpath_fn!(data, S),
+        wrap_xpath_fn!(base_uri, S),
+        wrap_xpath_fn!(document_uri, S),
     ]
 }

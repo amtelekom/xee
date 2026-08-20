@@ -8,7 +8,7 @@ mod tests {
     use crate::ast_ir::IrConverter;
 
     pub fn convert_ir(
-        static_context: &context::StaticContext,
+        static_context: &context::StaticContext<xot::Xot>,
         xpath: &str,
     ) -> error::SpannedResult<ir::ExprS> {
         let ast = static_context.parse_xpath(xpath)?;

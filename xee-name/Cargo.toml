@@ -16,5 +16,5 @@ serde = ["dep:serde"]
 
 [dependencies]
 ahash = { workspace = true }
-xot = { workspace = true }
 serde = { workspace = true, features = ["derive"], optional = true }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }

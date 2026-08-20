@@ -2,9 +2,9 @@ use std::fmt::Write;
 
 use xee_interpreter::{error, sequence::Sequence};
 use xee_xslt_compiler::evaluate;
-use xot::Xot;
+use xot::{Node, Xot};
 
-fn xml(xot: &Xot, sequence: Sequence) -> String {
+fn xml(xot: &Xot, sequence: Sequence<Node>) -> String {
     let mut f = String::new();
 
     for item in sequence.iter() {

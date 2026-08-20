@@ -1,10 +1,11 @@
 use ibig::{ibig, IBig};
 use xee_interpreter::sequence::Sequence;
 use xee_xpath::{error, query::RecurseQuery, Documents, Item, Queries, Query, Recurse};
+use xot::{Node, Xot};
 
 #[test]
 fn test_duplicate_document_uri() -> error::Result<()> {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let _doc1 = documents
         .add_string(
             "http://example.com/doc1".try_into().unwrap(),
@@ -27,7 +28,7 @@ fn test_duplicate_document_uri() -> error::Result<()> {
 
 #[test]
 fn test_simple_query() -> error::Result<()> {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let doc = documents
         .add_string("http://example.com".try_into().unwrap(), "<root>foo</root>")
         .unwrap();
@@ -44,7 +45,7 @@ fn test_simple_query() -> error::Result<()> {
 
 #[test]
 fn test_sequence_query() -> error::Result<()> {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let doc = documents
         .add_string("http://example.com".try_into().unwrap(), "<root>foo</root>")
         .unwrap();
@@ -53,14 +54,14 @@ fn test_sequence_query() -> error::Result<()> {
     let q = queries.sequence("/root/string()")?;
 
     let r = q.execute(&mut documents, doc)?;
-    let sequence: Sequence = "foo".into();
+    let sequence: Sequence<Node> = "foo".into();
     assert_eq!(r, sequence);
     Ok(())
 }
 
 #[test]
 fn test_option_query() -> error::Result<()> {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let doc_with_value = documents
         .add_string(
             "http://example.com/with_value".try_into().unwrap(),
@@ -88,7 +89,7 @@ fn test_option_query() -> error::Result<()> {
 
 #[test]
 fn test_nested_query() -> error::Result<()> {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let doc = documents
         .add_string(
             "http://example.com".try_into().unwrap(),
@@ -127,7 +128,7 @@ fn test_option_query_recurse() -> error::Result<()> {
 
     // a result is either a "value" or an "any-of" element
     let result_query = queries.one("/doc/result", |documents, item| {
-        let f = |documents: &mut Documents, item: &Item, recurse: &Recurse<_>| {
+        let f = |documents: &mut Documents<Xot>, item: &Item<Node>, recurse: &Recurse<_, Xot>| {
             // we either call the any of query, which recursively
             // calls this function
             if let Some(any_of) = any_of_recurse.execute(documents, item, recurse)? {
@@ -144,7 +145,7 @@ fn test_option_query_recurse() -> error::Result<()> {
         recurse.execute(documents, item)
     })?;
 
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let doc1 = documents
         .add_string(
             "http://example.com/doc1".try_into().unwrap(),
@@ -187,7 +188,7 @@ fn test_many_query_recurse() -> error::Result<()> {
 
     // a result is either a "value" or an "any-of" element
     let result_query = queries.one("/doc/result", |documents, item| {
-        let f = |documents: &mut Documents, item: &Item, recurse: &Recurse<_>| {
+        let f = |documents: &mut Documents<Xot>, item: &Item<Node>, recurse: &Recurse<_, Xot>| {
             // we either call the any of query, which recursively
             // calls this function
             let elements = any_of_recurse.execute(documents, item, recurse)?;
@@ -205,7 +206,7 @@ fn test_many_query_recurse() -> error::Result<()> {
         recurse.execute(documents, item)
     })?;
 
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let doc1 = documents
         .add_string(
             "http://example.com/doc1".try_into().unwrap(),
@@ -243,7 +244,7 @@ fn test_map_query() -> error::Result<()> {
         })?
         .map(|v, _, _| Ok(v + ibig!(1)));
 
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
 
     let r = q.execute(&mut documents, &1i64.into())?;
     assert_eq!(r, ibig!(4));
@@ -260,7 +261,7 @@ fn test_map_query_clone() -> error::Result<()> {
         })?
         .map(|v, _, _| Ok(v + ibig!(1)));
     let q = q.clone();
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
 
     let r = q.execute(&mut documents, &1i64.into())?;
     assert_eq!(r, ibig!(4));

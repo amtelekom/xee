@@ -1,4 +1,5 @@
 use xee_xpath::Documents;
+use xot::Xot;
 
 use crate::{
     dependency::KnownDependencies,
@@ -7,14 +8,14 @@ use crate::{
 };
 
 pub(crate) struct RunContext<'a> {
-    pub(crate) documents: &'a mut Documents,
+    pub(crate) documents: &'a mut Documents<Xot>,
     pub(crate) known_dependencies: KnownDependencies,
     pub(crate) verbose: bool,
 }
 
 impl<'a> RunContext<'a> {
     pub(crate) fn new(
-        documents: &'a mut Documents,
+        documents: &'a mut Documents<Xot>,
         known_dependencies: KnownDependencies,
         verbose: bool,
     ) -> Self {

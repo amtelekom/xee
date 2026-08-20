@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use xee_xpath::{context, Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::{catalog::LoadContext, hashmap::FxIndexSet};
 
@@ -49,7 +50,9 @@ impl KnownDependencies {
 }
 
 impl Dependency {
-    pub(crate) fn load<'a>(queries: &'a Queries) -> Result<impl Query<Vec<Vec<Dependency>>> + 'a> {
+    pub(crate) fn load<'a>(
+        queries: &'a Queries,
+    ) -> Result<impl Query<Vec<Vec<Dependency>>, Xot> + 'a> {
         let satisfied_query = queries.option("@satisfied/string()", convert_string)?;
         let type_query = queries.one("@type/string()", convert_string)?;
         let value_query = queries.one("@value/string()", convert_string)?;
@@ -167,7 +170,10 @@ impl ContextLoadable<LoadContext> for Dependencies {
         builder
     }
 
-    fn load_with_context(queries: &Queries, _context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load_with_context(
+        queries: &Queries,
+        _context: &LoadContext,
+    ) -> Result<impl Query<Self, Xot>> {
         let dependency_query = Dependency::load(queries)?;
 
         Ok(dependency_query.map(|dependencies, _, _| {

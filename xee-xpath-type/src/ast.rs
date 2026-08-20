@@ -1,6 +1,6 @@
+use xee_datasource::xmlname::NameStrInfo;
 use xee_name::Name;
 use xee_schema_type::Xs;
-use xot::xmlname::NameStrInfo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]

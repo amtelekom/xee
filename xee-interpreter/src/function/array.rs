@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
-use xot::Xot;
+use xee_datasource::XmlNode;
 
+use super::XmlDS;
 use crate::{context, error, sequence, string};
 
 /// An XPath Array
@@ -11,13 +12,10 @@ use crate::{context, error, sequence, string};
 ///
 /// I tried to make this a Rc<[]> but this is bigger and blows up the item as a result.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Array(pub(crate) Rc<Vec<sequence::Sequence>>);
+pub struct Array<N: XmlNode>(pub(crate) Rc<Vec<sequence::Sequence<N>>>);
 
-#[cfg(target_arch = "x86_64")]
-static_assertions::assert_eq_size!(Array, [u8; 8]);
-
-impl Array {
-    pub(crate) fn new(vec: Vec<sequence::Sequence>) -> Self {
+impl<N: XmlNode> Array<N> {
+    pub(crate) fn new(vec: Vec<sequence::Sequence<N>>) -> Self {
         Self(vec.into())
     }
 
@@ -29,15 +27,15 @@ impl Array {
         Self::new(vec)
     }
 
-    pub(crate) fn index(&self, index: usize) -> Option<&sequence::Sequence> {
+    pub(crate) fn index(&self, index: usize) -> Option<&sequence::Sequence<N>> {
         self.0.get(index)
     }
 
-    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &sequence::Sequence> {
+    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &sequence::Sequence<N>> {
         self.0.iter()
     }
 
-    pub(crate) fn put(&self, index: usize, member: &sequence::Sequence) -> Option<Self> {
+    pub(crate) fn put(&self, index: usize, member: &sequence::Sequence<N>) -> Option<Self> {
         if index >= self.0.len() {
             return None;
         }
@@ -46,7 +44,7 @@ impl Array {
         Some(Self::new(vec))
     }
 
-    pub(crate) fn append(&self, appendage: &sequence::Sequence) -> Self {
+    pub(crate) fn append(&self, appendage: &sequence::Sequence<N>) -> Self {
         let mut vec = self.0.as_ref().to_vec();
         vec.push(appendage.clone());
         Self::new(vec)
@@ -88,7 +86,7 @@ impl Array {
     pub(crate) fn insert_before(
         &self,
         position: usize,
-        member: &sequence::Sequence,
+        member: &sequence::Sequence<N>,
     ) -> Option<Self> {
         if position > self.0.len() {
             return None;
@@ -106,36 +104,47 @@ impl Array {
         self.0.is_empty()
     }
 
-    pub(crate) fn deep_equal(
+    pub(crate) fn deep_equal<S: XmlDS<Node = N>>(
         &self,
-        other: Array,
+        other: Array<N>,
         collation: &string::Collation,
         default_offset: chrono::FixedOffset,
-        xot: &Xot,
+        source: &S,
     ) -> error::Result<bool> {
         if self.0.len() != other.0.len() {
             return Ok(false);
         }
         for (a, b) in self.0.iter().zip(other.0.iter()) {
-            if !a.deep_equal(b, collation, default_offset, xot)? {
+            if !a.deep_equal(b, collation, default_offset, source)? {
                 return Ok(false);
             }
         }
         Ok(true)
     }
 
-    pub fn display_representation(&self, xot: &Xot, context: &context::DynamicContext) -> String {
+    pub fn display_representation<S: XmlDS<Node = N>>(
+        &self,
+        source: &S,
+        context: &context::DynamicContext<S>,
+    ) -> String {
         let members = self
             .0
             .iter()
-            .map(|member| member.display_representation(xot, context))
+            .map(|member| member.display_representation(source, context))
             .collect::<Vec<_>>();
         format!("[\n{}\n]", members.join(",\n"))
     }
 }
 
-impl From<Vec<sequence::Sequence>> for Array {
-    fn from(vec: Vec<sequence::Sequence>) -> Self {
+impl<N: XmlNode> From<Vec<sequence::Sequence<N>>> for Array<N> {
+    fn from(vec: Vec<sequence::Sequence<N>>) -> Self {
         Self::new(vec)
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[cfg(target_arch = "x86_64")]
+    static_assertions::assert_eq_size!(super::Array<xot::Node>, [u8; 8]);
 }

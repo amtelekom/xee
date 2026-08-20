@@ -2,6 +2,7 @@ use ibig::{ibig, IBig};
 
 use xee_interpreter::error::Error;
 use xee_interpreter::function::FunctionRule;
+use xee_interpreter::function::XmlDS;
 use xee_interpreter::interpreter::instruction::Instruction;
 use xee_interpreter::span::SourceSpan;
 use xee_interpreter::{error, function, sequence};
@@ -14,15 +15,15 @@ use super::scope;
 
 pub(crate) type Scopes = scope::Scopes<ir::Name>;
 
-pub struct FunctionCompiler<'a> {
+pub struct FunctionCompiler<'a, S: XmlDS> {
     pub(crate) scopes: &'a mut Scopes,
     pub(crate) mode_ids: &'a ModeIds,
-    pub(crate) builder: FunctionBuilder<'a>,
+    pub(crate) builder: FunctionBuilder<'a, S>,
 }
 
-impl<'a> FunctionCompiler<'a> {
+impl<'a, S: XmlDS> FunctionCompiler<'a, S> {
     pub fn new(
-        builder: FunctionBuilder<'a>,
+        builder: FunctionBuilder<'a, S>,
         scopes: &'a mut Scopes,
         mode_ids: &'a ModeIds,
     ) -> Self {
@@ -534,7 +535,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         // emit constant with size of map
         let len: IBig = map_constructor.members.len().into();
-        let len: sequence::Sequence = len.into();
+        let len: sequence::Sequence<S::Node> = len.into();
         self.builder.emit_constant(len, span);
         self.builder.emit(Instruction::CurlyMap, span);
         Ok(())
@@ -578,7 +579,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         // emit constant with length of array
         let len: IBig = atoms.len().into();
-        let len: sequence::Sequence = len.into();
+        let len: sequence::Sequence<S::Node> = len.into();
         self.builder.emit_constant(len, span);
         self.builder.emit(Instruction::SquareArray, span);
         Ok(())

@@ -4,7 +4,8 @@ use std::rc::Rc;
 use ahash::HashMap;
 use ahash::HashMapExt;
 use arrayvec::ArrayVec;
-use xot::Xot;
+use xee_datasource::XmlDS;
+use xee_datasource::XmlNode;
 
 use crate::error;
 use crate::function;
@@ -36,25 +37,25 @@ struct RegexKey {
 }
 
 #[derive(Debug)]
-pub struct State<'a> {
-    stack: Vec<stack::Value>,
-    build_stack: Vec<BuildStackEntry>,
+pub struct State<'a, S: XmlDS> {
+    stack: Vec<stack::Value<S::Node>>,
+    build_stack: Vec<BuildStackEntry<S::Node>>,
     frames: ArrayVec<Frame, FRAMES_MAX>,
     regex_cache: RefCell<HashMap<RegexKey, Rc<regexml::Regex>>>,
-    pub(crate) xot: &'a mut Xot,
+    pub(crate) source: &'a mut S,
 }
 
 #[derive(Debug)]
-struct ItemBuildStackEntry {
-    build_stack: Vec<sequence::Item>,
+struct ItemBuildStackEntry<N: XmlNode> {
+    build_stack: Vec<sequence::Item<N>>,
 }
 
 #[derive(Debug)]
-struct BuildStackEntry {
-    item: ItemBuildStackEntry,
+struct BuildStackEntry<N: XmlNode> {
+    item: ItemBuildStackEntry<N>,
 }
 
-impl BuildStackEntry {
+impl<N: XmlNode> BuildStackEntry<N> {
     fn new() -> Self {
         Self {
             item: ItemBuildStackEntry {
@@ -63,52 +64,52 @@ impl BuildStackEntry {
         }
     }
 
-    fn push(&mut self, item: sequence::Item) {
+    fn push(&mut self, item: sequence::Item<N>) {
         self.item.build_stack.push(item);
     }
 
-    fn extend<I: Iterator<Item = sequence::Item>>(
+    fn extend<I: Iterator<Item = sequence::Item<N>>>(
         &mut self,
-        items: impl IntoIterator<Item = sequence::Item, IntoIter = I>,
+        items: impl IntoIterator<Item = sequence::Item<N>, IntoIter = I>,
     ) {
         self.item.build_stack.extend(items);
     }
 }
 
-impl From<BuildStackEntry> for sequence::Sequence {
-    fn from(build: BuildStackEntry) -> Self {
+impl<N: XmlNode> From<BuildStackEntry<N>> for sequence::Sequence<N> {
+    fn from(build: BuildStackEntry<N>) -> Self {
         sequence::Sequence::new(build.item.build_stack)
     }
 }
 
-impl<'a> State<'a> {
-    pub(crate) fn new(xot: &'a mut Xot) -> Self {
+impl<'a, S: XmlDS> State<'a, S> {
+    pub(crate) fn new(source: &'a mut S) -> Self {
         Self {
             stack: vec![],
             build_stack: vec![],
             frames: ArrayVec::new(),
             regex_cache: RefCell::new(HashMap::new()),
-            xot,
+            source,
         }
     }
 
     pub(crate) fn push<T>(&mut self, sequence: T)
     where
-        T: Into<sequence::Sequence>,
+        T: Into<sequence::Sequence<S::Node>>,
     {
-        let sequence: sequence::Sequence = sequence.into();
+        let sequence: sequence::Sequence<S::Node> = sequence.into();
         self.stack.push(sequence.into());
     }
 
     pub(crate) fn push_value<T>(&mut self, value: T)
     where
-        T: Into<stack::Value>,
+        T: Into<stack::Value<S::Node>>,
     {
         self.stack.push(value.into());
     }
 
     pub(crate) fn build_new(&mut self) {
-        self.build_stack.push(BuildStackEntry::new());
+        self.build_stack.push(BuildStackEntry::<S::Node>::new());
     }
 
     pub(crate) fn build_push(&mut self) -> error::Result<()> {
@@ -146,16 +147,16 @@ impl<'a> State<'a> {
     }
 
     #[inline]
-    pub(crate) fn pop(&mut self) -> error::Result<sequence::Sequence> {
+    pub(crate) fn pop(&mut self) -> error::Result<sequence::Sequence<S::Node>> {
         self.pop_value().try_into()
     }
 
     #[inline]
-    pub(crate) fn pop_value(&mut self) -> stack::Value {
+    pub(crate) fn pop_value(&mut self) -> stack::Value<S::Node> {
         self.stack.pop().unwrap()
     }
 
-    pub(crate) fn function(&self) -> error::Result<function::Function> {
+    pub(crate) fn function(&self) -> error::Result<function::Function<S::Node>> {
         // the function is always just below the base
         let value = &self.stack[self.frame().base - 1];
         match value {
@@ -200,7 +201,7 @@ impl<'a> State<'a> {
         self.frame_mut().ip = (self.frame().ip as i32 + displacement) as usize;
     }
 
-    pub(crate) fn callable(&self, arity: usize) -> error::Result<function::Function> {
+    pub(crate) fn callable(&self, arity: usize) -> error::Result<function::Function<S::Node>> {
         let value = &self.stack[self.stack.len() - (arity + 1)];
         match value {
             stack::Value::Sequence(sequence) => sequence.clone().try_into(),
@@ -208,7 +209,7 @@ impl<'a> State<'a> {
         }
     }
 
-    pub(crate) fn arguments(&self, arity: usize) -> &[stack::Value] {
+    pub(crate) fn arguments(&self, arity: usize) -> &[stack::Value<S::Node>] {
         &self.stack[self.stack.len() - arity..]
     }
 
@@ -240,11 +241,11 @@ impl<'a> State<'a> {
         base == start_base
     }
 
-    pub(crate) fn top(&self) -> error::Result<sequence::Sequence> {
+    pub(crate) fn top(&self) -> error::Result<sequence::Sequence<S::Node>> {
         self.stack.last().unwrap().try_into()
     }
 
-    pub fn stack(&self) -> &[stack::Value] {
+    pub fn stack(&self) -> &[stack::Value<S::Node>] {
         &self.stack
     }
 
@@ -267,11 +268,11 @@ impl<'a> State<'a> {
         }
     }
 
-    pub fn xot(&self) -> &Xot {
-        self.xot
+    pub fn source(&self) -> &S {
+        self.source
     }
 
-    pub fn xot_mut(&mut self) -> &mut Xot {
-        self.xot
+    pub fn source_mut(&mut self) -> &mut S {
+        self.source
     }
 }

@@ -1,7 +1,5 @@
-use std::sync::OnceLock;
-
+use xee_datasource::{Element, StringNewtype, ValueRef, XmlDS};
 use xee_xpath_ast::XPathParserContext;
-use xot::{NameId, Node, Value};
 
 use crate::ast_core::Span;
 use crate::ast_core::{self as ast};
@@ -14,39 +12,27 @@ use crate::instruction::{DeclarationParser, InstructionParser, SequenceConstruct
 use crate::state::State;
 use crate::value_template::{ValueTemplateItem, ValueTemplateTokenizer};
 
-pub(crate) type NodeParserLock<V> =
-    OnceLock<Box<dyn NodeParser<V> + std::marker::Sync + std::marker::Send>>;
-
-// We use OnceLock to declare content parser once, and then reuse them
-pub(crate) type ContentParseLock<V> = OnceLock<
-    Box<dyn Fn(&Content) -> Result<V, ElementError> + std::marker::Sync + std::marker::Send>,
->;
-
-static SEQUENCE_CONSTRUCTOR: NodeParserLock<ast::SequenceConstructor> = OnceLock::new();
-static SEQUENCE_CONSTRUCTOR_CONTENT: ContentParseLock<ast::SequenceConstructor> = OnceLock::new();
-static DECLARATIONS_CONTENT: ContentParseLock<ast::Declarations> = OnceLock::new();
-
-pub(crate) struct XsltParser<'a> {
-    state: &'a State,
+pub(crate) struct XsltParser<'a, S: XmlDS> {
+    state: &'a State<S>,
 }
 
-impl<'a> XsltParser<'a> {
-    pub(crate) fn new(state: &'a State) -> Self {
+impl<'a, S: XmlDS> XsltParser<'a, S> {
+    pub(crate) fn new(state: &'a State<S>) -> Self {
         Self { state }
     }
 
-    pub(crate) fn parse_transform(&self, node: Node) -> Result<ast::Transform, ElementError> {
+    pub(crate) fn parse_transform(&self, node: S::Node) -> Result<ast::Transform, ElementError> {
         let parser = instruction(self.state.names.xsl_transform)
             .or(instruction(self.state.names.xsl_stylesheet));
         parser.parse(Some(node), self.state, &Context::empty())
     }
 }
 
-impl<'a> Content<'a> {
+impl<'a, S: XmlDS> Content<'a, S> {
     pub(crate) fn parse_element<V>(
         self,
-        element: &'a xot::Element,
-        f: impl FnOnce(&Attributes<'a>) -> Result<V, ElementError>,
+        element: &'a S::Element,
+        f: impl FnOnce(&Attributes<'a, S>) -> Result<V, ElementError>,
     ) -> Result<V, ElementError> {
         let attributes = self.attributes(element).with_standard()?;
         f(&attributes)
@@ -61,21 +47,25 @@ impl<'a> Content<'a> {
     }
 
     pub(crate) fn sequence_constructor(&self) -> Result<ast::SequenceConstructor, ElementError> {
-        SEQUENCE_CONSTRUCTOR_CONTENT.get_or_init(|| children(sequence_constructor()))(self)
+        self.lazy_init
+            .sequence_constructor
+            .get_or_init(|| children(sequence_constructor()))(self)
     }
 
     pub(crate) fn declarations(&self) -> Result<ast::Declarations, ElementError> {
-        DECLARATIONS_CONTENT.get_or_init(|| children(declarations()))(self)
+        self.lazy_init
+            .declarations_content
+            .get_or_init(|| children(declarations()))(self)
     }
 }
 
-pub(crate) fn sequence_constructor() -> impl NodeParser<ast::SequenceConstructor> {
-    multi(|content| {
+pub(crate) fn sequence_constructor<S: XmlDS>() -> impl NodeParser<ast::SequenceConstructor, S> {
+    multi(|content: Content<'_, S>| {
         let node = content.node;
         let state = &content.state;
         let context = &content.context;
-        match state.xot.value(node) {
-            Value::Text(text) => {
+        match state.source.value(node) {
+            ValueRef::Text(text) => {
                 let span = state.span(node).ok_or(ElementError::Internal)?;
                 let parser_context = content.parser_context();
                 if context.expand_text {
@@ -86,7 +76,7 @@ pub(crate) fn sequence_constructor() -> impl NodeParser<ast::SequenceConstructor
                     )])
                 }
             }
-            Value::Element(element) => content.parse_element(element, |attributes| {
+            ValueRef::Element(element) => content.parse_element(element, |attributes| {
                 Ok(vec![
                     ast::SequenceConstructorItem::parse_sequence_constructor_item(attributes)?,
                 ])
@@ -100,10 +90,10 @@ pub(crate) fn sequence_constructor() -> impl NodeParser<ast::SequenceConstructor
     .flatten()
 }
 
-fn declarations() -> impl NodeParser<ast::Declarations> {
-    one(|content| {
-        match content.state.xot.value(content.node) {
-            Value::Element(element) => content.parse_element(element, |attributes| {
+fn declarations<S: XmlDS>() -> impl NodeParser<ast::Declarations, S> {
+    one(|content: Content<'_, S>| {
+        match content.state.source.value(content.node) {
+            ValueRef::Element(element) => content.parse_element(element, |attributes| {
                 ast::Declaration::parse_declaration(attributes)
             }),
             _ => Err(ElementError::Unexpected {
@@ -136,17 +126,18 @@ fn text_value_template(
     Ok(items)
 }
 
-type ContentParse<V> =
-    Box<dyn Fn(&Content) -> Result<V, ElementError> + std::marker::Sync + std::marker::Send>;
+#[allow(type_alias_bounds)]
+type ContentParse<V, S: XmlDS> =
+    Box<dyn Fn(&Content<S>) -> Result<V, ElementError> + std::marker::Sync + std::marker::Send>;
 
-pub(crate) fn children<V, P>(parser: P) -> ContentParse<V>
+pub(crate) fn children<V, P, S: XmlDS>(parser: P) -> ContentParse<V, S>
 where
-    P: NodeParser<V> + std::marker::Sync + std::marker::Send + 'static,
+    P: NodeParser<V, S> + std::marker::Sync + std::marker::Send + 'static,
     V: std::marker::Sync + std::marker::Send + 'static,
 {
     Box::new(move |content| {
         let (item, next) = parser.parse_next(
-            content.state.xot.first_child(content.node),
+            content.state.source.first_child(content.node),
             content.state,
             &content.context,
         )?;
@@ -161,29 +152,30 @@ where
     })
 }
 
-pub(crate) fn by_element<V>(
-    f: impl Fn(&Attributes) -> Result<V, ElementError>,
-) -> impl Fn(Content) -> Result<V, ElementError> {
+pub(crate) fn by_element<V, S: XmlDS>(
+    f: impl Fn(&Attributes<S>) -> Result<V, ElementError>,
+) -> impl Fn(Content<S>) -> Result<V, ElementError> {
     move |content| {
-        let element = content
-            .state
-            .xot
-            .element(content.node)
-            .ok_or(ElementError::Unexpected {
-                span: content
-                    .state
-                    .span(content.node)
-                    .ok_or(ElementError::Internal)?,
-            })?;
+        let element =
+            content
+                .state
+                .source
+                .element(content.node)
+                .ok_or(ElementError::Unexpected {
+                    span: content
+                        .state
+                        .span(content.node)
+                        .ok_or(ElementError::Internal)?,
+                })?;
         content.parse_element(element, &f)
     }
 }
 
-pub(crate) fn by_element_name<V>(
-    name: NameId,
-    f: impl Fn(&Attributes) -> Result<V, ElementError>,
-) -> impl Fn(Content) -> Result<V, ElementError> {
-    by_element(move |attributes| {
+pub(crate) fn by_element_name<V, S: XmlDS>(
+    name: S::NameId,
+    f: impl Fn(&Attributes<S>) -> Result<V, ElementError>,
+) -> impl Fn(Content<S>) -> Result<V, ElementError> {
+    by_element(move |attributes: &Attributes<'_, S>| {
         if attributes.element.name() == name {
             f(attributes)
         } else {
@@ -194,14 +186,14 @@ pub(crate) fn by_element_name<V>(
     })
 }
 
-pub(crate) fn by_instruction<V: InstructionParser>(
-    name: NameId,
-) -> impl Fn(Content) -> Result<V, ElementError> {
+pub(crate) fn by_instruction<V: InstructionParser<S>, S: XmlDS>(
+    name: S::NameId,
+) -> impl Fn(Content<S>) -> Result<V, ElementError> {
     by_element_name(name, move |attributes| V::parse_and_validate(attributes))
 }
 
-pub(crate) fn instruction<V: InstructionParser>(
-    name: NameId,
-) -> OneParser<V, impl Fn(Content) -> Result<V, ElementError>> {
+pub(crate) fn instruction<V: InstructionParser<S>, S: XmlDS>(
+    name: S::NameId,
+) -> OneParser<V, impl Fn(Content<S>) -> Result<V, ElementError>, S> {
     one(by_instruction(name))
 }

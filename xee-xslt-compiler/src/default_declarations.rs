@@ -1,3 +1,4 @@
+use xee_interpreter::function::XmlDS;
 use xee_xslt_ast::{ast, error, parse_transform};
 
 // TODO: currently only applies to default mode, no array handling yet
@@ -22,7 +23,8 @@ const TEXT_ONLY_COPY: &str = r#"
 </xsl:stylesheet>
 "#;
 
-pub(crate) fn text_only_copy_declarations() -> Result<Vec<ast::Declaration>, error::ElementError> {
-    let transform = parse_transform(TEXT_ONLY_COPY)?;
+pub(crate) fn text_only_copy_declarations<S: XmlDS>(
+) -> Result<Vec<ast::Declaration>, error::ElementError> {
+    let transform = parse_transform::<S>(TEXT_ONLY_COPY)?;
     Ok(transform.declarations)
 }

@@ -1,10 +1,12 @@
 use ibig::IBig;
 
+use xee_datasource::XmlNode;
 use xee_name::Name;
 use xee_xpath_macros::xpath_fn;
 
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::sequence;
 use crate::wrap_xpath_fn;
 
@@ -22,14 +24,13 @@ fn my_function(a: IBig, b: IBig) -> IBig {
 // correct static type.
 //
 // So this support should be added.
-
 #[xpath_fn("fn:error() as item()*")]
-fn error_zero_args() -> error::Result<sequence::Sequence> {
+fn error_zero_args<N: XmlNode>() -> error::Result<sequence::Sequence<N>> {
     Err(error::Error::FOER0000)
 }
 
 #[xpath_fn("fn:error($code as xs:QName?) as item()*")]
-fn error_with_code(code: Option<Name>) -> error::Result<sequence::Sequence> {
+fn error_with_code<N: XmlNode>(code: Option<Name>) -> error::Result<sequence::Sequence<N>> {
     if let Some(code) = code {
         Err(error::Error::Application(Box::new(
             error::ApplicationError::new(code, "".to_string()),
@@ -40,26 +41,29 @@ fn error_with_code(code: Option<Name>) -> error::Result<sequence::Sequence> {
 }
 
 #[xpath_fn("fn:error($code as xs:QName?, $description as xs:string) as item()*")]
-fn error_with_code_and_description(
+fn error_with_code_and_description<N: XmlNode>(
     code: Option<Name>,
     description: &str,
-) -> error::Result<sequence::Sequence> {
+) -> error::Result<sequence::Sequence<N>> {
     error_helper(code, description)
 }
 
 #[xpath_fn(
     "fn:error($code as xs:QName?, $description as xs:string, $error_object as item()*) as item()*"
 )]
-fn error_with_code_and_description_and_sequence(
+fn error_with_code_and_description_and_sequence<N: XmlNode>(
     code: Option<Name>,
     description: &str,
-    _error_object: &sequence::Sequence,
-) -> error::Result<sequence::Sequence> {
+    _error_object: &sequence::Sequence<N>,
+) -> error::Result<sequence::Sequence<N>> {
     // FIXME: we are not doing anything with _error_object
     error_helper(code, description)
 }
 
-fn error_helper(code: Option<Name>, description: &str) -> error::Result<sequence::Sequence> {
+fn error_helper<N: XmlNode>(
+    code: Option<Name>,
+    description: &str,
+) -> error::Result<sequence::Sequence<N>> {
     if let Some(code) = code {
         Err(error::Error::Application(Box::new(
             error::ApplicationError::new(code, description.to_string()),
@@ -77,25 +81,28 @@ fn error_helper(code: Option<Name>, description: &str) -> error::Result<sequence
 }
 
 #[xpath_fn("fn:trace($value as item()*) as item()*")]
-fn trace(value: &sequence::Sequence) -> sequence::Sequence {
+fn trace<N: XmlNode>(value: &sequence::Sequence<N>) -> sequence::Sequence<N> {
     // TODO: direct values to the "trace data set".
     value.clone()
 }
 
 #[xpath_fn("fn:trace($value as item()*,$label as xs:string) as item()*")]
-fn trace_with_label(value: &sequence::Sequence, _label: &str) -> sequence::Sequence {
+fn trace_with_label<N: XmlNode>(
+    value: &sequence::Sequence<N>,
+    _label: &str,
+) -> sequence::Sequence<N> {
     // TODO: direct values + label to the "trace data set".
     value.clone()
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(my_function),
-        wrap_xpath_fn!(error_zero_args),
-        wrap_xpath_fn!(error_with_code),
-        wrap_xpath_fn!(error_with_code_and_description),
-        wrap_xpath_fn!(error_with_code_and_description_and_sequence),
-        wrap_xpath_fn!(trace),
-        wrap_xpath_fn!(trace_with_label),
+        wrap_xpath_fn!(my_function, S),
+        wrap_xpath_fn!(error_zero_args, S),
+        wrap_xpath_fn!(error_with_code, S),
+        wrap_xpath_fn!(error_with_code_and_description, S),
+        wrap_xpath_fn!(error_with_code_and_description_and_sequence, S),
+        wrap_xpath_fn!(trace, S),
+        wrap_xpath_fn!(trace_with_label, S),
     ]
 }

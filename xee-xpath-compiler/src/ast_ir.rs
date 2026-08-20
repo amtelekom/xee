@@ -1,19 +1,23 @@
+use xee_datasource::xmlname::NameStrInfo;
+use xee_interpreter::function::XmlDS;
 use xee_interpreter::{context, error, error::Error, function, xml};
 use xee_ir::{ir, ir::AtomS, Binding, Bindings, Variables};
 use xee_schema_type::Xs;
 use xee_xpath_ast::{ast, ast::Span, span::Spanned, FN_NAMESPACE};
-use xot::xmlname::NameStrInfo;
 
 #[derive(Debug)]
-pub struct IrConverter<'a> {
+pub struct IrConverter<'a, S: XmlDS> {
     variables: &'a mut Variables,
-    static_context: &'a context::StaticContext,
+    static_context: &'a context::StaticContext<S>,
     fn_position: ast::Name,
     fn_last: ast::Name,
 }
 
-impl<'a> IrConverter<'a> {
-    pub fn new(variables: &'a mut Variables, static_context: &'a context::StaticContext) -> Self {
+impl<'a, S: XmlDS> IrConverter<'a, S> {
+    pub fn new(
+        variables: &'a mut Variables,
+        static_context: &'a context::StaticContext<S>,
+    ) -> Self {
         Self {
             variables,
             static_context,
@@ -773,14 +777,14 @@ mod tests {
 
     fn convert_expr_single(s: &str) -> error::SpannedResult<ir::ExprS> {
         let ast = ast::ExprSingle::parse(s)?;
-        let static_context = context::StaticContext::default();
+        let static_context = context::StaticContext::<xot::Xot>::default();
         let mut variables = Variables::new();
         let mut converter = IrConverter::new(&mut variables, &static_context);
         converter.convert_expr_single(&ast)
     }
 
     pub(crate) fn convert_xpath(s: &str) -> error::SpannedResult<ir::ExprS> {
-        let static_context = context::StaticContext::default();
+        let static_context = context::StaticContext::<xot::Xot>::default();
         let ast = static_context.parse_xpath(s)?;
         let mut variables = Variables::new();
         let mut converter = IrConverter::new(&mut variables, &static_context);

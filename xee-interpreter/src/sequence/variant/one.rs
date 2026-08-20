@@ -1,40 +1,42 @@
-use crate::sequence::AtomizedItemIter;
-use crate::{atomic, error};
+use xee_datasource::XmlNode;
 
+use crate::function::XmlDS;
 use crate::sequence::item::Item;
 use crate::sequence::traits::{SequenceCompare, SequenceCore, SequenceExt, SequenceOrder};
+use crate::sequence::AtomizedItemIter;
+use crate::{atomic, error};
 
 // this size should be below a usize
 const MAXIMUM_RANGE_SIZE: i64 = 2_i64.pow(25);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct One {
-    item: Item,
+pub struct One<N: XmlNode> {
+    item: Item<N>,
 }
 
-impl One {
-    pub(crate) fn item(&self) -> &Item {
+impl<N: XmlNode> One<N> {
+    pub(crate) fn item(&self) -> &Item<N> {
         &self.item
     }
 
-    pub(crate) fn into_item(self) -> Item {
+    pub(crate) fn into_item(self) -> Item<N> {
         self.item
     }
 }
 
-impl From<Item> for One {
-    fn from(item: Item) -> Self {
+impl<N: XmlNode> From<Item<N>> for One<N> {
+    fn from(item: Item<N>) -> Self {
         One { item }
     }
 }
 
-impl From<One> for Item {
-    fn from(one: One) -> Self {
+impl<N: XmlNode> From<One<N>> for Item<N> {
+    fn from(one: One<N>) -> Self {
         one.item
     }
 }
 
-impl<'a> SequenceCore<'a, std::iter::Once<Item>> for One {
+impl<'a, N: XmlNode> SequenceCore<'a, std::iter::Once<Item<N>>, N> for One<N> {
     #[inline]
     fn is_empty(&self) -> bool {
         false
@@ -46,7 +48,7 @@ impl<'a> SequenceCore<'a, std::iter::Once<Item>> for One {
     }
 
     #[inline]
-    fn get(&self, index: usize) -> Option<Item> {
+    fn get(&self, index: usize) -> Option<Item<N>> {
         if index == 0 {
             Some(self.item.clone())
         } else {
@@ -55,17 +57,17 @@ impl<'a> SequenceCore<'a, std::iter::Once<Item>> for One {
     }
 
     #[inline]
-    fn one(self) -> error::Result<Item> {
+    fn one(self) -> error::Result<Item<N>> {
         Ok(self.item)
     }
 
     #[inline]
-    fn option(self) -> error::Result<Option<Item>> {
+    fn option(self) -> error::Result<Option<Item<N>>> {
         Ok(Some(self.item))
     }
 
     #[inline]
-    fn iter(&'a self) -> std::iter::Once<Item> {
+    fn iter(&'a self) -> std::iter::Once<Item<N>> {
         std::iter::once(self.item.clone())
     }
 
@@ -75,40 +77,42 @@ impl<'a> SequenceCore<'a, std::iter::Once<Item>> for One {
     }
 
     #[inline]
-    fn string_value(&self, xot: &xot::Xot) -> error::Result<String> {
-        self.item.string_value(xot)
+    fn string_value<S: XmlDS<Node = N>>(&self, source: &S) -> error::Result<String> {
+        self.item.string_value(source)
     }
 }
 
-impl<'a, I> SequenceExt<'a, I> for One
+impl<'a, I, N: XmlNode + 'a> SequenceExt<'a, I, N> for One<N>
 where
-    I: Iterator<Item = Item> + 'a,
-    One: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    One<N>: SequenceCore<'a, I, N>,
 {
-    fn atomized(
+    fn atomized<S: XmlDS<Node = N>>(
         &'a self,
-        xot: &'a xot::Xot,
+        source: &'a S,
     ) -> impl Iterator<Item = error::Result<atomic::Atomic>> + 'a {
-        AtomizedItemIter::new(&self.item, xot)
+        AtomizedItemIter::new(&self.item, source)
     }
 }
 
-impl<'a, I> SequenceCompare<'a, I> for One
+impl<'a, I, N: XmlNode> SequenceCompare<'a, I, N> for One<N>
 where
-    I: Iterator<Item = Item> + 'a,
-    One: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    One<N>: SequenceCore<'a, I, N>,
 {
 }
 
-impl<'a, I> SequenceOrder<'a, I> for One
+impl<'a, I, N: XmlNode> SequenceOrder<'a, I, N> for One<N>
 where
-    I: Iterator<Item = Item>,
-    One: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>>,
+    One<N>: SequenceCore<'a, I, N>,
 {
-    fn one_node(&self) -> error::Result<xot::Node> {
+    fn one_node(&self) -> error::Result<N> {
         match &self.item {
             Item::Node(n) => Ok(*n),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "One::one_node called on a non-Node Item",
+            )),
         }
     }
 }

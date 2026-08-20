@@ -17,12 +17,13 @@ proc-macro = true
 [dependencies]
 xee-xpath-ast = { path = "../xee-xpath-ast", version = "0.1.4" }
 xee-schema-type = { path = "../xee-schema-type", version = "0.1.4" }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }
 proc-macro2 = { version = "1", default-features = false }
 quote = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }
-xot = { workspace = true }
+proc-macro-crate = "3.5.0"
 
 [dev-dependencies]
 serde = { workspace = true, features = ["derive"] }
 insta = { workspace = true, features = ["yaml", "glob"] }
-xot = { workspace = true, features = ["serde"] }
+xee-interpreter = { path = "../xee-interpreter", version = "0.2.0" }

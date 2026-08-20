@@ -14,13 +14,13 @@ homepage = "https://github.com/Paligo/xee"
 [dependencies]
 xee-xpath-load = { path = "../xee-xpath-load", version = "0.2.0" }
 xee-xpath = { path = "../xee-xpath", version = "0.1.5" }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }
 # the dependency on the xslt compiler should be replaced with xee-xslt dependency
 xee-xslt-compiler = { path = "../xee-xslt-compiler", version = "0.1.6" }
 xee-name = { path = "../xee-name", version = "0.1.5" }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 ahash = { workspace = true }
-xot = { workspace = true }
 fxhash = "0.2.1"
 indexmap = "2.8.0"
 clap = { workspace = true, features = ["derive"] }
@@ -30,6 +30,7 @@ chrono = { workspace = true }
 ibig = { workspace = true }
 iri-string = { workspace = true }
 url = "2.5.4"
+xot = {workspace = true}
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml", "glob"] }

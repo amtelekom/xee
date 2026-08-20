@@ -25,5 +25,6 @@ Ok(
         },
         kind: None,
         signature_string: "fn:foo() as xs:string",
+        xmlds: None,
     },
 )

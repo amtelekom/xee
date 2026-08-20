@@ -27,5 +27,6 @@ Ok(
             "context_first",
         ),
         signature_string: "fn:foo() as xs:string",
+        xmlds: None,
     },
 )

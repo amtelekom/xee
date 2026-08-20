@@ -2,6 +2,7 @@
 
 use ahash::HashMap;
 use ibig::IBig;
+use xee_datasource::XmlNode;
 use xee_xpath_macros::xpath_fn;
 
 use crate::atomic::op_add;
@@ -14,28 +15,29 @@ use crate::atomic::StringType;
 use crate::context::DynamicContext;
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::sequence;
 use crate::string::Collation;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("fn:empty($arg as item()*) as xs:boolean")]
-fn empty(arg: &sequence::Sequence) -> bool {
+fn empty<N: XmlNode>(arg: &sequence::Sequence<N>) -> bool {
     arg.is_empty()
 }
 
 #[xpath_fn("fn:exists($arg as item()*) as xs:boolean")]
-fn exists(arg: &sequence::Sequence) -> bool {
+fn exists<N: XmlNode>(arg: &sequence::Sequence<N>) -> bool {
     !arg.is_empty()
 }
 
 #[xpath_fn("fn:head($arg as item()*) as item()?")]
-fn head(arg: &sequence::Sequence) -> Option<sequence::Item> {
+fn head<N: XmlNode>(arg: &sequence::Sequence<N>) -> Option<sequence::Item<N>> {
     arg.iter().next()
 }
 
 #[xpath_fn("fn:tail($arg as item()*) as item()*")]
-fn tail(arg: &sequence::Sequence) -> sequence::Sequence {
+fn tail<N: XmlNode>(arg: &sequence::Sequence<N>) -> sequence::Sequence<N> {
     if arg.is_empty() {
         return sequence::Sequence::default();
     }
@@ -49,11 +51,11 @@ fn tail(arg: &sequence::Sequence) -> sequence::Sequence {
 #[xpath_fn(
     "fn:insert-before($target as item()*, $position as xs:integer, $inserts as item()*) as item()*"
 )]
-fn insert_before(
-    target: &sequence::Sequence,
+fn insert_before<N: XmlNode>(
+    target: &sequence::Sequence<N>,
     position: IBig,
-    inserts: &sequence::Sequence,
-) -> error::Result<sequence::Sequence> {
+    inserts: &sequence::Sequence<N>,
+) -> error::Result<sequence::Sequence<N>> {
     if target.is_empty() {
         return Ok(inserts.clone());
     }
@@ -92,7 +94,10 @@ fn insert_before(
 }
 
 #[xpath_fn("fn:remove($target as item()*, $position as xs:integer) as item()*")]
-fn remove(target: &sequence::Sequence, position: IBig) -> error::Result<sequence::Sequence> {
+fn remove<N: XmlNode>(
+    target: &sequence::Sequence<N>,
+    position: IBig,
+) -> error::Result<sequence::Sequence<N>> {
     let position = if position < IBig::from(0) {
         IBig::from(0)
     } else {
@@ -109,7 +114,7 @@ fn remove(target: &sequence::Sequence, position: IBig) -> error::Result<sequence
 }
 
 #[xpath_fn("fn:reverse($arg as item()*) as item()*")]
-fn reverse(arg: &sequence::Sequence) -> sequence::Sequence {
+fn reverse<N: XmlNode>(arg: &sequence::Sequence<N>) -> sequence::Sequence<N> {
     if arg.is_empty() {
         return arg.clone();
     }
@@ -119,7 +124,10 @@ fn reverse(arg: &sequence::Sequence) -> sequence::Sequence {
 }
 
 #[xpath_fn("fn:subsequence($sourceSeq as item()*, $startingLoc as xs:double) as item()*")]
-fn subsequence2(source_seq: &sequence::Sequence, starting_loc: f64) -> Vec<sequence::Item> {
+fn subsequence2<N: XmlNode>(
+    source_seq: &sequence::Sequence<N>,
+    starting_loc: f64,
+) -> Vec<sequence::Item<N>> {
     if starting_loc.is_nan() {
         return Vec::new();
     }
@@ -132,11 +140,11 @@ fn subsequence2(source_seq: &sequence::Sequence, starting_loc: f64) -> Vec<seque
 #[xpath_fn(
     "fn:subsequence($sourceSeq as item()*, $startingLoc as xs:double, $length as xs:double) as item()*"
 )]
-fn subsequence3(
-    source_seq: &sequence::Sequence,
+fn subsequence3<N: XmlNode>(
+    source_seq: &sequence::Sequence<N>,
     starting_loc: f64,
     length: f64,
-) -> Vec<sequence::Item> {
+) -> Vec<sequence::Item<N>> {
     let starting_loc = starting_loc.round();
     let starting_loc = starting_loc - 1.0;
     let length = length.round();
@@ -157,7 +165,7 @@ fn subsequence3(
 }
 
 #[xpath_fn("fn:unordered($sourceSeq as item()*) as item()*")]
-fn unordered(source_seq: &sequence::Sequence) -> sequence::Sequence {
+fn unordered<N: XmlNode>(source_seq: &sequence::Sequence<N>) -> sequence::Sequence<N> {
     source_seq.clone()
 }
 
@@ -165,8 +173,8 @@ fn unordered(source_seq: &sequence::Sequence) -> sequence::Sequence {
     "fn:distinct-values($arg as xs:anyAtomicType*, $collation as xs:string) as xs:anyAtomicType*",
     collation
 )]
-fn distinct_values(
-    context: &DynamicContext,
+fn distinct_values<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
     collation: &str,
 ) -> error::Result<Vec<Atomic>> {
@@ -208,8 +216,8 @@ fn distinct_values(
 }
 
 #[xpath_fn("fn:index-of($seq as xs:anyAtomicType*, $search as xs:anyAtomicType, $collation as xs:string) as xs:integer*", collation)]
-fn index_of(
-    context: &DynamicContext,
+fn index_of<S: XmlDS>(
+    context: &DynamicContext<S>,
     seq: impl Iterator<Item = error::Result<Atomic>>,
     search: Atomic,
     collation: &str,
@@ -228,22 +236,24 @@ fn index_of(
 }
 
 #[xpath_fn("fn:deep-equal($parameter1 as item()*, $parameter2 as item()*, $collation as xs:string) as xs:boolean", collation)]
-fn deep_equal(
-    context: &DynamicContext,
-    interpreter: &Interpreter,
-    parameter1: &sequence::Sequence,
-    parameter2: &sequence::Sequence,
+fn deep_equal<S: XmlDS>(
+    context: &DynamicContext<S>,
+    interpreter: &Interpreter<S>,
+    parameter1: &sequence::Sequence<S::Node>,
+    parameter2: &sequence::Sequence<S::Node>,
     collation: &str,
 ) -> error::Result<bool> {
     let collation = context
         .static_context()
         .resolve_collation_str(Some(collation))?;
     let default_offset = context.implicit_timezone();
-    parameter1.deep_equal(parameter2, &collation, default_offset, interpreter.xot())
+    parameter1.deep_equal(parameter2, &collation, default_offset, interpreter.source())
 }
 
 #[xpath_fn("fn:zero-or-one($arg as item()*) as item()?")]
-fn zero_or_one(arg: &sequence::Sequence) -> error::Result<Option<sequence::Item>> {
+fn zero_or_one<N: XmlNode>(
+    arg: &sequence::Sequence<N>,
+) -> error::Result<Option<sequence::Item<N>>> {
     match arg.len() {
         0 => Ok(None),
         1 => Ok(arg.iter().next()),
@@ -252,7 +262,7 @@ fn zero_or_one(arg: &sequence::Sequence) -> error::Result<Option<sequence::Item>
 }
 
 #[xpath_fn("fn:one-or-more($arg as item()*) as item()+")]
-fn one_or_more(arg: &sequence::Sequence) -> error::Result<sequence::Sequence> {
+fn one_or_more<N: XmlNode>(arg: &sequence::Sequence<N>) -> error::Result<sequence::Sequence<N>> {
     if arg.is_empty() {
         Err(error::Error::FORG0004)
     } else {
@@ -261,7 +271,7 @@ fn one_or_more(arg: &sequence::Sequence) -> error::Result<sequence::Sequence> {
 }
 
 #[xpath_fn("fn:exactly-one($arg as item()*) as item()")]
-fn exactly_one(arg: &sequence::Sequence) -> error::Result<sequence::Item> {
+fn exactly_one<N: XmlNode>(arg: &sequence::Sequence<N>) -> error::Result<sequence::Item<N>> {
     if arg.len() == 1 {
         Ok(arg.iter().next().unwrap().clone())
     } else {
@@ -270,13 +280,13 @@ fn exactly_one(arg: &sequence::Sequence) -> error::Result<sequence::Item> {
 }
 
 #[xpath_fn("fn:count($arg as item()*) as xs:integer")]
-fn count(arg: &sequence::Sequence) -> IBig {
+fn count<N: XmlNode>(arg: &sequence::Sequence<N>) -> IBig {
     arg.len().into()
 }
 
 #[xpath_fn("fn:avg($arg as xs:anyAtomicType*) as xs:anyAtomicType?")]
-fn avg(
-    context: &DynamicContext,
+fn avg<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
 ) -> error::Result<Option<Atomic>> {
     let r = sum_atoms(arg, context.implicit_timezone())?;
@@ -293,8 +303,8 @@ fn avg(
     "fn:max($arg as xs:anyAtomicType*, $collation as xs:string) as xs:anyAtomicType?",
     collation
 )]
-fn max(
-    context: &DynamicContext,
+fn max<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
     collation: &str,
 ) -> error::Result<Option<Atomic>> {
@@ -317,8 +327,8 @@ fn max(
     "fn:min($arg as xs:anyAtomicType*, $collation as xs:string) as xs:anyAtomicType?",
     collation
 )]
-fn min(
-    context: &DynamicContext,
+fn min<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
     collation: &str,
 ) -> error::Result<Option<Atomic>> {
@@ -337,8 +347,8 @@ fn min(
     )
 }
 
-fn min_or_max<F>(
-    context: &DynamicContext,
+fn min_or_max<F, S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
     collation: &str,
     compare: F,
@@ -419,8 +429,8 @@ where
 }
 
 #[xpath_fn("fn:sum($arg as xs:anyAtomicType*) as xs:anyAtomicType")]
-fn sum1(
-    context: &DynamicContext,
+fn sum1<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
 ) -> error::Result<Atomic> {
     let sum = sum_atoms(arg, context.implicit_timezone())?;
@@ -432,8 +442,8 @@ fn sum1(
 }
 
 #[xpath_fn("fn:sum($arg as xs:anyAtomicType*, $zero as xs:anyAtomicType?) as xs:anyAtomicType?")]
-fn sum2(
-    context: &DynamicContext,
+fn sum2<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: impl Iterator<Item = error::Result<Atomic>>,
     zero: Option<Atomic>,
 ) -> error::Result<Option<Atomic>> {
@@ -479,29 +489,29 @@ fn sum_atoms(
     }
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(empty),
-        wrap_xpath_fn!(exists),
-        wrap_xpath_fn!(head),
-        wrap_xpath_fn!(tail),
-        wrap_xpath_fn!(insert_before),
-        wrap_xpath_fn!(remove),
-        wrap_xpath_fn!(reverse),
-        wrap_xpath_fn!(subsequence2),
-        wrap_xpath_fn!(subsequence3),
-        wrap_xpath_fn!(unordered),
-        wrap_xpath_fn!(distinct_values),
-        wrap_xpath_fn!(index_of),
-        wrap_xpath_fn!(deep_equal),
-        wrap_xpath_fn!(zero_or_one),
-        wrap_xpath_fn!(one_or_more),
-        wrap_xpath_fn!(exactly_one),
-        wrap_xpath_fn!(count),
-        wrap_xpath_fn!(avg),
-        wrap_xpath_fn!(max),
-        wrap_xpath_fn!(min),
-        wrap_xpath_fn!(sum1),
-        wrap_xpath_fn!(sum2),
+        wrap_xpath_fn!(empty, S),
+        wrap_xpath_fn!(exists, S),
+        wrap_xpath_fn!(head, S),
+        wrap_xpath_fn!(tail, S),
+        wrap_xpath_fn!(insert_before, S),
+        wrap_xpath_fn!(remove, S),
+        wrap_xpath_fn!(reverse, S),
+        wrap_xpath_fn!(subsequence2, S),
+        wrap_xpath_fn!(subsequence3, S),
+        wrap_xpath_fn!(unordered, S),
+        wrap_xpath_fn!(distinct_values, S),
+        wrap_xpath_fn!(index_of, S),
+        wrap_xpath_fn!(deep_equal, S),
+        wrap_xpath_fn!(zero_or_one, S),
+        wrap_xpath_fn!(one_or_more, S),
+        wrap_xpath_fn!(exactly_one, S),
+        wrap_xpath_fn!(count, S),
+        wrap_xpath_fn!(avg, S),
+        wrap_xpath_fn!(max, S),
+        wrap_xpath_fn!(min, S),
+        wrap_xpath_fn!(sum1, S),
+        wrap_xpath_fn!(sum2, S),
     ]
 }

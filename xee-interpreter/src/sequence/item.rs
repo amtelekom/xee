@@ -1,13 +1,19 @@
-use xot::Xot;
+use xee_datasource::Attribute;
+use xee_datasource::Namespace;
+use xee_datasource::StringNewtype;
+use xee_datasource::ValueRef;
+use xee_datasource::XmlNode;
+use xee_datasource::XmlNodeWrapper;
 
 use crate::atomic;
 use crate::context;
 use crate::error;
 use crate::function;
+use crate::function::XmlDS;
 
 /// An XPath item. These are the items that make up an XPath sequence.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Item {
+pub enum Item<N: XmlNode> {
     /// An atomic value.
     ///
     /// One of the value types defined by XPath, indicated by an `xs:*` type
@@ -16,55 +22,61 @@ pub enum Item {
     /// A node in an XML document.
     ///
     /// This is defined using the [`xot`] library.
-    Node(xot::Node),
+    Node(N),
     /// An XPath function type.
-    Function(function::Function),
+    Function(function::Function<N>),
 }
 
-// a static assertion to ensure that Item never grows in size
-#[cfg(target_arch = "x86_64")]
-static_assertions::assert_eq_size!(Item, [u8; 24]);
-
-impl Item {
+impl<N: XmlNode> Item<N> {
     /// Try to get the atomic value of the item.
     pub fn to_atomic(&self) -> error::Result<atomic::Atomic> {
         match self {
             Item::Atomic(a) => Ok(a.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Item::to_atomic called on a non-Atomic Item",
+            )),
         }
     }
 
     /// Try to get the node value of the item.
-    pub fn to_node(&self) -> error::Result<xot::Node> {
+    pub fn to_node(&self) -> error::Result<N> {
         match self {
             Item::Node(n) => Ok(*n),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Item::to_node called on a non-Node Item",
+            )),
         }
     }
 
     /// Try to get the function value of the item.
-    pub fn to_function(&self) -> error::Result<function::Function> {
+    pub fn to_function(&self) -> error::Result<function::Function<N>> {
         match self {
             Item::Function(f) => Ok(f.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Item::to_function called on a non-Function Item",
+            )),
         }
     }
 
     /// Try to get the value as an XPath Map.
-    pub fn to_map(&self) -> error::Result<function::Map> {
+    pub fn to_map(&self) -> error::Result<function::Map<N>> {
         if let Item::Function(function::Function::Map(map)) = self {
             Ok(map.clone())
         } else {
-            Err(error::Error::XPTY0004)
+            Err(error::Error::XPTY0004(
+                "Item::to_map called on an Item that is not a Map",
+            ))
         }
     }
 
     /// Try to get the value as an XPath Array.
-    pub fn to_array(&self) -> error::Result<function::Array> {
+    pub fn to_array(&self) -> error::Result<function::Array<N>> {
         if let Item::Function(function::Function::Array(array)) = self {
             Ok(array.clone())
         } else {
-            Err(error::Error::XPTY0004)
+            Err(error::Error::XPTY0004(
+                "Item::to_array called on an Item that is not an Array",
+            ))
         }
     }
 
@@ -100,7 +112,9 @@ impl Item {
         match self {
             Item::Atomic(a) => a.clone().try_into(),
             // atomic::Atomic::try_from(a.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Item::try_into_value called on a non-Atomic Item",
+            )),
         }
     }
 
@@ -113,10 +127,10 @@ impl Item {
     ///   node](https://www.w3.org/TR/xpath-31/#id-typed-value).
     ///
     /// - For a function, it errors.
-    pub fn string_value(&self, xot: &Xot) -> error::Result<String> {
+    pub fn string_value<S: XmlDS<Node = N>>(&self, source: &S) -> error::Result<String> {
         match self {
             Item::Atomic(atomic) => Ok(atomic.string_value()),
-            Item::Node(node) => Ok(xot.string_value(*node)),
+            Item::Node(node) => Ok(source.string_value(*node)),
             Item::Function(_) => Err(error::Error::FOTY0014),
         }
     }
@@ -125,15 +139,15 @@ impl Item {
     /// For atomics this is a true parseable XPath representation.
     /// For node and function that does not exist, so we generate a plausible
     /// version for display purposes only.
-    pub fn display_representation(
+    pub fn display_representation<S: XmlDS<Node = N>>(
         &self,
-        xot: &Xot,
-        context: &context::DynamicContext,
+        source: &S,
+        context: &context::DynamicContext<S>,
     ) -> error::Result<String> {
         match self {
             Item::Atomic(atomic) => Ok(atomic.xpath_representation()),
-            Item::Node(node) => node_display_representation(*node, xot),
-            Item::Function(function) => Ok(function.display_representation(xot, context)),
+            Item::Node(node) => node_display_representation(*node, source),
+            Item::Function(function) => Ok(function.display_representation(source, context)),
         }
     }
 
@@ -154,11 +168,11 @@ impl Item {
     }
 }
 
-fn node_display_representation(node: xot::Node, xot: &Xot) -> error::Result<String> {
-    match xot.value(node) {
-        xot::Value::Attribute(attribute) => {
+fn node_display_representation<S: XmlDS>(node: S::Node, source: &S) -> error::Result<String> {
+    match source.value(node) {
+        ValueRef::Attribute(attribute) => {
             let value = attribute.value();
-            let (name, namespace) = xot.name_ns_str(attribute.name());
+            let (name, namespace) = source.name_ns_str(attribute.name());
             let name = if !namespace.is_empty() {
                 format!("Q{{{}}}{}", namespace, name)
             } else {
@@ -166,18 +180,18 @@ fn node_display_representation(node: xot::Node, xot: &Xot) -> error::Result<Stri
             };
             Ok(format!("Attribute {}=\"{}\"", name, value))
         }
-        xot::Value::Namespace(namespace) => {
+        ValueRef::Namespace(namespace) => {
             let prefix_id = namespace.prefix();
             let namespace_id = namespace.namespace();
-            let prefix_str = xot.prefix_str(prefix_id);
-            let namespace_str = xot.namespace_str(namespace_id);
+            let prefix_str = source.prefix_str(prefix_id);
+            let namespace_str = source.namespace_str(namespace_id);
             Ok(format!("Namespace {}:{}", prefix_str, namespace_str))
         }
-        xot::Value::Text(text) => Ok(format!("Text \"{}\"", text.get())),
+        ValueRef::Text(text) => Ok(format!("Text \"{}\"", text.get())),
         // for everything else we can just serialize the node
-        _ => Ok(xot.serialize_xml_string(
+        _ => Ok(source.serialize_xml_string(
             {
-                xot::output::xml::Parameters {
+                xee_datasource::output::xml::Parameters {
                     indentation: Default::default(),
                     ..Default::default()
                 }
@@ -187,7 +201,7 @@ fn node_display_representation(node: xot::Node, xot: &Xot) -> error::Result<Stri
     }
 }
 
-impl<T> From<T> for Item
+impl<T, N: XmlNode> From<T> for Item<N>
 where
     T: Into<atomic::Atomic>,
 {
@@ -196,122 +210,156 @@ where
     }
 }
 
-impl TryFrom<Item> for atomic::Atomic {
+impl<N: XmlNode> TryFrom<Item<N>> for atomic::Atomic {
     type Error = error::Error;
 
-    fn try_from(item: Item) -> error::Result<atomic::Atomic> {
+    fn try_from(item: Item<N>) -> error::Result<atomic::Atomic> {
         match item {
             Item::Atomic(a) => Ok(a),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Atomic::try_from called with a non-Atomic Item",
+            )),
         }
     }
 }
 
-impl TryFrom<&Item> for atomic::Atomic {
+impl<N: XmlNode> TryFrom<&Item<N>> for atomic::Atomic {
     type Error = error::Error;
 
-    fn try_from(item: &Item) -> error::Result<atomic::Atomic> {
+    fn try_from(item: &Item<N>) -> error::Result<atomic::Atomic> {
         match item {
             Item::Atomic(a) => Ok(a.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Atomic::try_from called with a non-Atomic Item",
+            )),
         }
     }
 }
 
-impl From<xot::Node> for Item {
-    fn from(node: xot::Node) -> Self {
-        Self::Node(node)
+impl<N: XmlNode> From<XmlNodeWrapper<N>> for Item<N> {
+    fn from(node: XmlNodeWrapper<N>) -> Self {
+        Self::Node(node.0)
     }
 }
 
-impl TryFrom<Item> for xot::Node {
+// impl<N: XmlNode> TryFrom<Item<N>> for N {
+//     type Error = error::Error;
+
+//     fn try_from(item: Item<N>) -> error::Result<Self> {
+//         match item {
+//             Item::Node(node) => Ok(node),
+//             _ => Err(error::Error::XPTY0004),
+//         }
+//     }
+// }
+
+impl<N: XmlNode> TryInto<XmlNodeWrapper<N>> for Item<N> {
     type Error = error::Error;
 
-    fn try_from(item: Item) -> error::Result<Self> {
-        match item {
-            Item::Node(node) => Ok(node),
-            _ => Err(error::Error::XPTY0004),
+    fn try_into(self) -> Result<XmlNodeWrapper<N>, Self::Error> {
+        match self {
+            Item::Node(node) => Ok(XmlNodeWrapper(node)),
+            _ => Err(error::Error::XPTY0004(
+                "XmlNodeWrapper::try_from called with a non-Node Item",
+            )),
         }
     }
 }
 
-impl TryFrom<&Item> for xot::Node {
+// impl<N: XmlNode> TryFrom<&Item<N>> for N {
+//     type Error = error::Error;
+
+//     fn try_from(item: &Item<N>) -> error::Result<Self> {
+//         match item {
+//             Item::Node(node) => Ok(*node),
+//             _ => Err(error::Error::XPTY0004),
+//         }
+//     }
+// }
+
+impl<N: XmlNode> TryInto<XmlNodeWrapper<N>> for &Item<N> {
     type Error = error::Error;
 
-    fn try_from(item: &Item) -> error::Result<Self> {
-        match item {
-            Item::Node(node) => Ok(*node),
-            _ => Err(error::Error::XPTY0004),
+    fn try_into(self) -> Result<XmlNodeWrapper<N>, Self::Error> {
+        match self {
+            Item::Node(node) => Ok(XmlNodeWrapper(*node)),
+            _ => Err(error::Error::XPTY0004(
+                "XmlNodeWrapper::try_from called with a non-Node Item",
+            )),
         }
     }
 }
 
-impl TryFrom<Item> for function::Function {
+impl<N: XmlNode> TryFrom<Item<N>> for function::Function<N> {
     type Error = error::Error;
 
-    fn try_from(item: Item) -> error::Result<Self> {
+    fn try_from(item: Item<N>) -> error::Result<Self> {
         match item {
             Item::Function(f) => Ok(f.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Function::try_from called with a non-Function Item",
+            )),
         }
     }
 }
 
-impl TryFrom<&Item> for function::Function {
+impl<N: XmlNode> TryFrom<&Item<N>> for function::Function<N> {
     type Error = error::Error;
 
-    fn try_from(item: &Item) -> error::Result<Self> {
+    fn try_from(item: &Item<N>) -> error::Result<Self> {
         match item {
             Item::Function(f) => Ok(f.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Function::try_from called with a non-Function Item",
+            )),
         }
     }
 }
 
-impl From<function::Function> for Item {
-    fn from(f: function::Function) -> Self {
+impl<N: XmlNode> From<function::Function<N>> for Item<N> {
+    fn from(f: function::Function<N>) -> Self {
         Self::Function(f)
     }
 }
 
-impl From<function::Array> for Item {
-    fn from(array: function::Array) -> Self {
+impl<N: XmlNode> From<function::Array<N>> for Item<N> {
+    fn from(array: function::Array<N>) -> Self {
         Self::Function(function::Function::Array(array))
     }
 }
 
-impl From<function::Map> for Item {
-    fn from(map: function::Map) -> Self {
+impl<N: XmlNode> From<function::Map<N>> for Item<N> {
+    fn from(map: function::Map<N>) -> Self {
         Self::Function(function::Function::Map(map))
     }
 }
 
-pub enum AtomizedItemIter<'a> {
+pub enum AtomizedItemIter<'a, S: XmlDS> {
     Atomic(std::iter::Once<atomic::Atomic>),
     Node(std::iter::Once<atomic::Atomic>),
-    Array(AtomizedArrayIter<'a>),
+    Array(AtomizedArrayIter<'a, S>),
     // TODO: properly handle functions; for now they error
     Erroring(std::iter::Once<error::Result<atomic::Atomic>>),
 }
 
-impl<'a> AtomizedItemIter<'a> {
-    pub(crate) fn new(item: &'a Item, xot: &'a Xot) -> Self {
+impl<'a, S: XmlDS> AtomizedItemIter<'a, S> {
+    pub(crate) fn new(item: &'a Item<S::Node>, source: &'a S) -> Self {
         match item {
             Item::Atomic(a) => Self::Atomic(std::iter::once(a.clone())),
             Item::Node(n) => {
-                let s = xot.string_value(*n);
+                let s = source.string_value(*n);
                 let value = atomic::Atomic::Untyped(s.into());
                 Self::Node(std::iter::once(value))
             }
             Item::Function(function) => match function {
-                function::Function::Array(a) => Self::Array(AtomizedArrayIter::new(a, xot)),
+                function::Function::Array(a) => Self::Array(AtomizedArrayIter::new(a, source)),
                 _ => Self::Erroring(std::iter::once(Err(error::Error::FOTY0013))),
             },
         }
     }
 }
 
-impl Iterator for AtomizedItemIter<'_> {
+impl<S: XmlDS> Iterator for AtomizedItemIter<'_, S> {
     type Item = error::Result<atomic::Atomic>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -342,7 +390,7 @@ impl Iterator for AtomizedItemIter<'_> {
 // }
 
 // impl AtomizedNodeIter {
-//     fn new(node: xot::Node, xot: &Xot) -> Self {
+//     fn new(node: Node, xot: &Xot) -> Self {
 //         Self {
 //             typed_value: typed_value(xot, node),
 //             typed_value_index: 0,
@@ -350,7 +398,7 @@ impl Iterator for AtomizedItemIter<'_> {
 //     }
 // }
 
-// fn typed_value(xot: &Xot, node: xot::Node) -> Vec<atomic::Atomic> {
+// fn typed_value(xot: &Xot, node: Node) -> Vec<atomic::Atomic> {
 //     // for now we don't know any types of nodes yet; everything is untyped
 //     let s = xot.string_value(node);
 //     vec![atomic::Atomic::Untyped(s.into())]
@@ -375,17 +423,17 @@ impl Iterator for AtomizedItemIter<'_> {
 //     }
 // }
 
-pub struct AtomizedArrayIter<'a> {
-    xot: &'a Xot,
-    array: &'a function::Array,
+pub struct AtomizedArrayIter<'a, S: XmlDS> {
+    source: &'a S,
+    array: &'a function::Array<S::Node>,
     array_index: usize,
     iter: Option<Box<dyn Iterator<Item = error::Result<atomic::Atomic>> + 'a>>,
 }
 
-impl<'a> AtomizedArrayIter<'a> {
-    fn new(array: &'a function::Array, xot: &'a Xot) -> Self {
+impl<'a, S: XmlDS> AtomizedArrayIter<'a, S> {
+    fn new(array: &'a function::Array<S::Node>, source: &'a S) -> Self {
         Self {
-            xot,
+            source,
             array,
             array_index: 0,
             iter: None,
@@ -393,7 +441,7 @@ impl<'a> AtomizedArrayIter<'a> {
     }
 }
 
-impl Iterator for AtomizedArrayIter<'_> {
+impl<S: XmlDS> Iterator for AtomizedArrayIter<'_, S> {
     type Item = error::Result<atomic::Atomic>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -415,7 +463,7 @@ impl Iterator for AtomizedArrayIter<'_> {
             let sequence = &array[self.array_index];
             self.array_index += 1;
 
-            self.iter = Some(Box::new(sequence.atomized(self.xot)));
+            self.iter = Some(Box::new(sequence.atomized(self.source)));
         }
     }
 
@@ -427,4 +475,12 @@ impl Iterator for AtomizedArrayIter<'_> {
         let remaining = self.array.0.len() - self.array_index;
         (remaining, None)
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    // a static assertion to ensure that Item never grows in size
+    #[cfg(target_arch = "x86_64")]
+    static_assertions::assert_eq_size!(super::Item<::xot::Node>, [u8; 24]);
 }

@@ -1,13 +1,14 @@
+use xee_datasource::XmlNode;
 use xee_schema_type::Xs;
 use xee_xpath_macros::xpath_fn;
-use xot::Xot;
 
+use crate::function::XmlDS;
 use crate::{atomic, context, error, function, interpreter::Interpreter, sequence, wrap_xpath_fn};
 
 use super::StaticFunctionDescription;
 
 #[xpath_fn("fn:parse-json($json_text as xs:string?) as item()?")]
-fn parse_json1(json_text: Option<&str>) -> error::Result<Option<sequence::Item>> {
+fn parse_json1<N: XmlNode>(json_text: Option<&str>) -> error::Result<Option<sequence::Item<N>>> {
     if let Some(json_text) = json_text {
         let value = json::parse(json_text).map_err(|_| error::Error::FOJS0001)?;
         // the spec seems to imply escape should be true by default, but then
@@ -20,14 +21,14 @@ fn parse_json1(json_text: Option<&str>) -> error::Result<Option<sequence::Item>>
 }
 
 #[xpath_fn("fn:parse-json($json_text as xs:string?, $options as map(*)) as item()?")]
-fn parse_json2(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
+fn parse_json2<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
     json_text: Option<&str>,
-    options: function::Map,
-) -> error::Result<Option<sequence::Item>> {
+    options: function::Map<S::Node>,
+) -> error::Result<Option<sequence::Item<S::Node>>> {
     let parameters =
-        ParseJsonParameters::from_map(&options, context.static_context(), interpreter.xot())?;
+        ParseJsonParameters::from_map(&options, context.static_context(), interpreter.source())?;
 
     if let Some(json_text) = json_text {
         let value = json::parse(json_text).map_err(|_| error::Error::FOJS0001)?;
@@ -58,12 +59,12 @@ struct ParseJsonParameters {
 }
 
 impl ParseJsonParameters {
-    fn from_map(
-        map: &function::Map,
-        static_context: &context::StaticContext,
-        xot: &Xot,
+    fn from_map<S: XmlDS>(
+        map: &function::Map<S::Node>,
+        static_context: &context::StaticContext<S>,
+        source: &S,
     ) -> error::Result<Self> {
-        let c = sequence::OptionParameterConverter::new(map, static_context, xot);
+        let c = sequence::OptionParameterConverter::new(map, static_context, source);
 
         let liberal = c
             .option_with_default("liberal", Xs::Boolean, false)
@@ -93,10 +94,10 @@ impl ParseJsonParameters {
     }
 }
 
-fn parse_json_value(
+fn parse_json_value<N: XmlNode>(
     value: &json::JsonValue,
     escape: bool,
-) -> error::Result<Option<sequence::Item>> {
+) -> error::Result<Option<sequence::Item<N>>> {
     match value {
         json::JsonValue::Null => Ok(None),
         json::JsonValue::Short(s) => Ok(Some(parse_json_string(s.to_string(), escape).into())),
@@ -114,7 +115,7 @@ fn parse_json_value(
             let mut entries = Vec::with_capacity(a.len());
             for value in a.iter() {
                 let value = parse_json_value(value, escape)?;
-                let sequence: sequence::Sequence = value.into();
+                let sequence: sequence::Sequence<N> = value.into();
                 entries.push(sequence);
             }
             let array = function::Array::new(entries);
@@ -127,7 +128,7 @@ fn parse_json_value(
             for (key, value) in o.iter() {
                 let key = parse_json_string(key.to_string(), escape);
                 let value = parse_json_value(value, escape)?;
-                let sequence: sequence::Sequence = value.into();
+                let sequence: sequence::Sequence<N> = value.into();
                 entries.push((key.clone(), sequence));
             }
             let map = function::Map::new(entries)?;
@@ -148,6 +149,9 @@ fn parse_json_string(s: String, escape: bool) -> atomic::Atomic {
     atomic
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
-    vec![wrap_xpath_fn!(parse_json1), wrap_xpath_fn!(parse_json2)]
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
+    vec![
+        wrap_xpath_fn!(parse_json1, S),
+        wrap_xpath_fn!(parse_json2, S),
+    ]
 }

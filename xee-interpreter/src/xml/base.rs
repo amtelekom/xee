@@ -1,21 +1,21 @@
 use iri_string::types::{IriAbsoluteString, IriReferenceStr, IriStr, IriString};
-use xot;
+use xee_datasource::{ValueRef, XmlAttribAccess, XmlDS};
 
 use crate::error;
 
-pub(crate) struct BaseUriResolver<'a> {
+pub(crate) struct BaseUriResolver<'a, S: XmlDS> {
     document_base_uri: Option<&'a IriStr>,
-    xml_base_name: xot::NameId,
-    xot: &'a xot::Xot,
+    xml_base_name: S::NameId,
+    source: &'a S,
 }
 
-impl<'a> BaseUriResolver<'a> {
-    pub(crate) fn new(document_base_uri: Option<&'a IriStr>, xot: &'a mut xot::Xot) -> Self {
-        let xml_base_name = xot.add_name_ns("base", xot.xml_namespace());
+impl<'a, S: XmlDS> BaseUriResolver<'a, S> {
+    pub(crate) fn new(document_base_uri: Option<&'a IriStr>, source: &'a mut S) -> Self {
+        let xml_base_name = source.add_name_ns("base", source.xml_namespace());
         Self {
             document_base_uri,
             xml_base_name,
-            xot,
+            source,
         }
     }
 
@@ -27,15 +27,15 @@ impl<'a> BaseUriResolver<'a> {
     // proper URIs but LEIRIs https://www.w3.org/TR/leiri/ which are supposed
     // to handle character data differently. I haven't done any work to verify
     // that behavior.
-    pub(crate) fn base_uri(&self, node: xot::Node) -> Result<Option<IriString>, error::Error> {
-        Ok(match self.xot.value(node) {
-            xot::Value::Document => self.document_base_uri.map(|u| u.to_owned()),
-            xot::Value::Element(_) => {
-                let base = self.xot.attributes(node).get(self.xml_base_name);
+    pub(crate) fn base_uri(&self, node: S::Node) -> Result<Option<IriString>, error::Error> {
+        Ok(match self.source.value(node) {
+            ValueRef::Document => self.document_base_uri.map(|u| u.to_owned()),
+            ValueRef::Element(_) => {
+                let base = self.source.attributes(node).get(self.xml_base_name);
 
                 if let Some(base) = base {
                     let base: &IriReferenceStr = base
-                        .as_str()
+                        .as_ref()
                         .try_into()
                         .map_err(|_| error::Error::FORG0002)?;
                     match base.to_iri() {
@@ -43,7 +43,7 @@ impl<'a> BaseUriResolver<'a> {
                         Err(iri) => {
                             // iri is relative, so resolve against the
                             // parent's base uri
-                            if let Some(parent) = self.xot.parent(node) {
+                            if let Some(parent) = self.source.parent(node) {
                                 let base = self.base_uri(parent)?;
                                 if let Some(base) = base {
                                     let base: IriAbsoluteString =
@@ -60,7 +60,7 @@ impl<'a> BaseUriResolver<'a> {
                             }
                         }
                     }
-                } else if let Some(parent) = self.xot.parent(node) {
+                } else if let Some(parent) = self.source.parent(node) {
                     self.base_uri(parent)?
                 } else {
                     None
@@ -70,17 +70,17 @@ impl<'a> BaseUriResolver<'a> {
             // itself, but it's based on either its parent or the document, and
             // that is the same behavior as attribute, text and comment nodes.
             // Maybe I got something wrong?
-            xot::Value::Attribute(_)
-            | xot::Value::Comment(_)
-            | xot::Value::Text(_)
-            | xot::Value::ProcessingInstruction(_) => {
-                if let Some(parent) = self.xot.parent(node) {
+            ValueRef::Attribute(_)
+            | ValueRef::Comment(_)
+            | ValueRef::Text(_)
+            | ValueRef::ProcessingInstruction(_) => {
+                if let Some(parent) = self.source.parent(node) {
                     self.base_uri(parent)?
                 } else {
                     None
                 }
             }
-            xot::Value::Namespace(_) => None,
+            ValueRef::Namespace(_) => None,
         })
     }
 }

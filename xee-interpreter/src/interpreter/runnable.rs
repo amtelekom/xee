@@ -2,13 +2,13 @@ use std::rc::Rc;
 
 use ibig::ibig;
 use iri_string::types::IriReferenceStr;
-use xot::Xot;
 
 use crate::context::DocumentsRef;
 use crate::context::DynamicContext;
 use crate::context::StaticContext;
 use crate::error::SpannedError;
 use crate::function::Function;
+use crate::function::XmlDS;
 use crate::interpreter::interpret::ContextInfo;
 use crate::sequence;
 use crate::stack;
@@ -19,26 +19,26 @@ use super::Interpreter;
 use super::Program;
 
 #[derive(Debug)]
-pub struct Runnable<'a> {
-    program: &'a Program,
+pub struct Runnable<'a, S: XmlDS> {
+    program: &'a Program<S>,
     // TODO: this should be private, but is needed right now
     // to implement call_static without lifetime issues.
     // We could possibly obtain context from the interpreter directly,
     // but this leads to lifetime issues right now.
-    pub(crate) dynamic_context: &'a DynamicContext<'a>,
+    pub(crate) dynamic_context: &'a DynamicContext<'a, S>,
 }
 
-impl<'a> Runnable<'a> {
-    pub(crate) fn new(program: &'a Program, dynamic_context: &'a DynamicContext) -> Self {
+impl<'a, S: XmlDS> Runnable<'a, S> {
+    pub(crate) fn new(program: &'a Program<S>, dynamic_context: &'a DynamicContext<'a, S>) -> Self {
         Self {
             program,
             dynamic_context,
         }
     }
 
-    fn run_value(&self, xot: &'a mut Xot) -> error::SpannedResult<stack::Value> {
+    fn run_value(&self, source: &'a mut S) -> error::SpannedResult<stack::Value<S::Node>> {
         let arguments = self.dynamic_context.arguments().unwrap();
-        let mut interpreter = Interpreter::new(self, xot);
+        let mut interpreter = Interpreter::new(self, source);
 
         let context_info = if let Some(context_item) = self.dynamic_context.context_item() {
             ContextInfo {
@@ -79,13 +79,13 @@ impl<'a> Runnable<'a> {
     }
 
     /// Run the program against a sequence item.
-    pub fn many(&self, xot: &'a mut Xot) -> error::SpannedResult<sequence::Sequence> {
-        Ok(self.run_value(xot)?.try_into()?)
+    pub fn many(&self, source: &'a mut S) -> error::SpannedResult<sequence::Sequence<S::Node>> {
+        Ok(self.run_value(source)?.try_into()?)
     }
 
     /// Run the program, expect a single item as the result.
-    pub fn one(&self, xot: &'a mut Xot) -> error::SpannedResult<sequence::Item> {
-        let sequence = self.many(xot)?;
+    pub fn one(&self, source: &'a mut S) -> error::SpannedResult<sequence::Item<S::Node>> {
+        let sequence = self.many(source)?;
         sequence.one().map_err(|error| SpannedError {
             error,
             span: Some(self.program.span().into()),
@@ -93,8 +93,11 @@ impl<'a> Runnable<'a> {
     }
 
     /// Run the program, expect an optional single item as the result.
-    pub fn option(&self, xot: &'a mut Xot) -> error::SpannedResult<Option<sequence::Item>> {
-        let sequence = self.many(xot)?;
+    pub fn option(
+        &self,
+        source: &'a mut S,
+    ) -> error::SpannedResult<Option<sequence::Item<S::Node>>> {
+        let sequence = self.many(source)?;
         let items = sequence.iter();
         sequence::option(items).map_err(|error| SpannedError {
             error,
@@ -102,19 +105,19 @@ impl<'a> Runnable<'a> {
         })
     }
 
-    pub(crate) fn program(&self) -> &'a Program {
+    pub(crate) fn program(&self) -> &'a Program<S> {
         self.program
     }
 
-    pub fn dynamic_context(&self) -> &'a DynamicContext<'_> {
+    pub fn dynamic_context(&self) -> &'a DynamicContext<'_, S> {
         self.dynamic_context
     }
 
-    pub fn documents(&self) -> DocumentsRef {
+    pub fn documents(&self) -> DocumentsRef<S> {
         self.dynamic_context.documents()
     }
 
-    pub fn static_context(&self) -> &StaticContext {
+    pub fn static_context(&self) -> &StaticContext<S> {
         self.program.static_context()
     }
 
@@ -132,7 +135,7 @@ impl<'a> Runnable<'a> {
         self.dynamic_context.implicit_timezone()
     }
 
-    pub fn function_info<'b>(&self, function: &'b Function) -> FunctionInfo<'a, 'b> {
+    pub fn function_info<'b>(&self, function: &'b Function<S::Node>) -> FunctionInfo<'a, 'b, S> {
         self.program.function_info(function)
     }
 }

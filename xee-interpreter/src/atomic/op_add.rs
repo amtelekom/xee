@@ -69,7 +69,9 @@ pub(crate) fn op_add(
         (Atomic::DayTimeDuration(a), Atomic::DayTimeDuration(b)) => {
             Ok(op_add_day_time_durations(a, b)?)
         }
-        _ => Err(error::Error::XPTY0004),
+        _ => Err(error::Error::XPTY0004(
+            "op_add called with an unsupported combination of Atomic types",
+        )),
     }
 }
 

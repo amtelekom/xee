@@ -1,11 +1,11 @@
 // option parameter conventions
 // <https://www.w3.org/TR/xpath-functions-31/#option-parameter-conventions>
 
+use xee_datasource::xmlname::{NameStrInfo, OwnedName};
 use xee_schema_type::Xs;
 use xee_xpath_ast::ast;
-use xot::xmlname::{NameStrInfo, OwnedName};
-use xot::Xot;
 
+use crate::function::XmlDS;
 use crate::{atomic, context, error, function::Map};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,22 +31,22 @@ impl QNameOrString {
     }
 }
 
-pub(crate) struct OptionParameterConverter<'a> {
-    map: &'a Map,
-    static_context: &'a context::StaticContext,
-    xot: &'a Xot,
+pub(crate) struct OptionParameterConverter<'a, S: XmlDS> {
+    map: &'a Map<S::Node>,
+    static_context: &'a context::StaticContext<S>,
+    source: &'a S,
 }
 
-impl<'a> OptionParameterConverter<'a> {
+impl<'a, S: XmlDS> OptionParameterConverter<'a, S> {
     pub(crate) fn new(
-        map: &'a Map,
-        static_context: &'a context::StaticContext,
-        xot: &'a Xot,
+        map: &'a Map<S::Node>,
+        static_context: &'a context::StaticContext<S>,
+        source: &'a S,
     ) -> Self {
         Self {
             map,
             static_context,
-            xot,
+            source,
         }
     }
 
@@ -60,7 +60,7 @@ impl<'a> OptionParameterConverter<'a> {
             ast::Occurrence::Option,
             atomic_type,
             self.static_context,
-            self.xot,
+            self.source,
         )?;
         let value = if let Some(value) = value {
             value.option()?
@@ -101,7 +101,7 @@ impl<'a> OptionParameterConverter<'a> {
             ast::Occurrence::Many,
             atomic_type,
             self.static_context,
-            self.xot,
+            self.source,
         )?;
         let values = if let Some(value) = value {
             value

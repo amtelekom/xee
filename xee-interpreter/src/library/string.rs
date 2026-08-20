@@ -6,12 +6,13 @@ use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use ibig::IBig;
 use icu::normalizer::{ComposingNormalizer, DecomposingNormalizer};
 
+use crate::function::XmlDS;
 use regexml::{AnalyzeEntry, MatchEntry};
+use xee_datasource::{XmlMutAttribAccess, XmlMutNamespaceAccess, XmlNodeWrapper};
 use xee_name::{Name, FN_NAMESPACE};
 use xee_schema_type::Xs;
 use xee_xpath_macros::xpath_fn;
 use xee_xpath_type::ast;
-use xot::Xot;
 
 use crate::context::DynamicContext;
 use crate::function::{self, StaticFunctionDescription};
@@ -62,8 +63,8 @@ fn string_to_codepoints(arg: Option<&str>) -> error::Result<Vec<IBig>> {
     "fn:compare($arg1 as xs:string?, $arg2 as xs:string?, $collation as xs:string) as xs:integer?",
     collation
 )]
-fn compare(
-    context: &DynamicContext,
+fn compare<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg1: Option<&str>,
     arg2: Option<&str>,
     collation: &str,
@@ -100,8 +101,8 @@ fn codepoint_equal(comparand1: Option<&str>, comparand2: Option<&str>) -> Option
     "fn:contains-token($input as xs:string*, $token as xs:string, $collation as xs:string) as xs:boolean",
     collation
 )]
-fn contains_token(
-    context: &DynamicContext,
+fn contains_token<S: XmlDS>(
+    context: &DynamicContext<S>,
     input: impl Iterator<Item = error::Result<String>>,
     token: &str,
     collation: &str,
@@ -127,17 +128,17 @@ fn contains_token(
 // function that does this. We're going to define a general
 // concat function and then register it for a sufficient amount
 // of arities
-fn concat(
-    _context: &DynamicContext,
-    interpreter: &mut interpreter::Interpreter,
-    arguments: &[sequence::Sequence],
-) -> error::Result<sequence::Sequence> {
+fn concat<S: XmlDS>(
+    _context: &DynamicContext<S>,
+    interpreter: &mut interpreter::Interpreter<S>,
+    arguments: &[sequence::Sequence<S::Node>],
+) -> error::Result<sequence::Sequence<S::Node>> {
     debug_assert!(arguments.len() >= 2);
 
     let strings = arguments
         .iter()
         .map(|argument| {
-            let atomic = occurrence::option(argument.atomized(interpreter.xot()))?;
+            let atomic = occurrence::option(argument.atomized(interpreter.source()))?;
             if let Some(atomic) = atomic {
                 Ok(atomic.string_value())
             } else {
@@ -357,8 +358,8 @@ fn translate(arg: Option<&str>, map_string: &str, trans_string: &str) -> String 
     "fn:contains($arg1 as xs:string?, $arg2 as xs:string?, $collation as xs:string) as xs:boolean",
     collation
 )]
-fn contains(
-    context: &DynamicContext,
+fn contains<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg1: Option<&str>,
     arg2: Option<&str>,
     collation: &str,
@@ -388,8 +389,8 @@ fn contains(
 }
 
 #[xpath_fn("fn:starts-with($arg1 as xs:string?, $arg2 as xs:string?, $collation as xs:string) as xs:boolean", collation)]
-fn starts_with(
-    context: &DynamicContext,
+fn starts_with<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg1: Option<&str>,
     arg2: Option<&str>,
     collation: &str,
@@ -422,8 +423,8 @@ fn starts_with(
     "fn:ends-with($arg1 as xs:string?, $arg2 as xs:string?, $collation as xs:string) as xs:boolean",
     collation
 )]
-fn ends_with(
-    context: &DynamicContext,
+fn ends_with<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg1: Option<&str>,
     arg2: Option<&str>,
     collation: &str,
@@ -453,8 +454,8 @@ fn ends_with(
 }
 
 #[xpath_fn("fn:substring-before($arg1 as xs:string?, $arg2 as xs:string?, $collation as xs:string) as xs:string", collation)]
-fn substring_before(
-    context: &DynamicContext,
+fn substring_before<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg1: Option<&str>,
     arg2: Option<&str>,
     collation: &str,
@@ -486,8 +487,8 @@ fn substring_before(
 }
 
 #[xpath_fn("fn:substring-after($arg1 as xs:string?, $arg2 as xs:string?, $collation as xs:string) as xs:string", collation)]
-fn substring_after(
-    context: &DynamicContext,
+fn substring_after<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg1: Option<&str>,
     arg2: Option<&str>,
     collation: &str,
@@ -527,8 +528,8 @@ fn substring_after(
 #[xpath_fn(
     "fn:matches($input as xs:string?, $pattern as xs:string, $flags as xs:string) as xs:boolean"
 )]
-fn matches3(
-    interpreter: &mut Interpreter,
+fn matches3<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     flags: &str,
@@ -537,16 +538,16 @@ fn matches3(
 }
 
 #[xpath_fn("fn:matches($input as xs:string?, $pattern as xs:string) as xs:boolean")]
-fn matches2(
-    interpreter: &mut Interpreter,
+fn matches2<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
 ) -> error::Result<bool> {
     matches(interpreter, input, pattern, "")
 }
 
-fn matches(
-    interpreter: &mut Interpreter,
+fn matches<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     flags: &str,
@@ -557,8 +558,8 @@ fn matches(
 }
 
 #[xpath_fn("fn:replace($input as xs:string?, $pattern as xs:string, $replacement as xs:string, $flags as xs:string) as xs:string")]
-fn replace4(
-    interpreter: &mut Interpreter,
+fn replace4<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     replacement: &str,
@@ -568,8 +569,8 @@ fn replace4(
 }
 
 #[xpath_fn("fn:replace($input as xs:string?, $pattern as xs:string, $replacement as xs:string) as xs:string")]
-fn replace3(
-    interpreter: &mut Interpreter,
+fn replace3<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     replacement: &str,
@@ -577,8 +578,8 @@ fn replace3(
     replace(interpreter, input, pattern, replacement, "")
 }
 
-fn replace(
-    interpreter: &mut Interpreter,
+fn replace<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     replacement: &str,
@@ -592,8 +593,8 @@ fn replace(
 #[xpath_fn(
     "fn:tokenize($input as xs:string?, $pattern as xs:string, $flags as xs:string) as xs:string*"
 )]
-fn tokenize3(
-    interpreter: &mut Interpreter,
+fn tokenize3<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     flags: &str,
@@ -602,16 +603,16 @@ fn tokenize3(
 }
 
 #[xpath_fn("fn:tokenize($input as xs:string?, $pattern as xs:string) as xs:string*")]
-fn tokenize2(
-    interpreter: &mut Interpreter,
+fn tokenize2<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
 ) -> error::Result<Vec<String>> {
     tokenize(interpreter, input, pattern, "")
 }
 
-fn tokenize(
-    interpreter: &mut Interpreter,
+fn tokenize<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     flags: &str,
@@ -622,146 +623,148 @@ fn tokenize(
 }
 
 #[xpath_fn("fn:analyze-string($input as xs:string?, $pattern as xs:string) as element()")]
-fn analyze_string2(
-    interpreter: &mut Interpreter,
+fn analyze_string2<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
-) -> error::Result<sequence::Sequence> {
+) -> error::Result<sequence::Sequence<S::Node>> {
     analyze_string(interpreter, input, pattern, "")
 }
 
 #[xpath_fn(
     "fn:analyze-string($input as xs:string?, $pattern as xs:string, $flags as xs:string) as element()"
 )]
-fn analyze_string3(
-    interpreter: &mut Interpreter,
+fn analyze_string3<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     flags: &str,
-) -> error::Result<sequence::Sequence> {
+) -> error::Result<sequence::Sequence<S::Node>> {
     analyze_string(interpreter, input, pattern, flags)
 }
 
-struct AnalyzeStringNames {
-    fn_prefix: xot::PrefixId,
-    fn_namespace: xot::NamespaceId,
-    analyze_string_result: xot::NameId,
-    match_: xot::NameId,
-    non_match: xot::NameId,
-    group_name: xot::NameId,
-    group_nr: xot::NameId,
+struct AnalyzeStringNames<S: XmlDS> {
+    fn_prefix: S::PrefixId,
+    fn_namespace: S::NamespaceId,
+    analyze_string_result: S::NameId,
+    match_: S::NameId,
+    non_match: S::NameId,
+    group_name: S::NameId,
+    group_nr: S::NameId,
 }
 
-impl AnalyzeStringNames {
-    fn new(xot: &mut xot::Xot) -> Self {
-        let fn_namespace = xot.add_namespace(FN_NAMESPACE);
+impl<S: XmlDS> AnalyzeStringNames<S> {
+    fn new(source: &mut S) -> Self {
+        let fn_namespace = source.add_namespace(FN_NAMESPACE);
         Self {
-            fn_prefix: xot.add_prefix("fn"),
+            fn_prefix: source.add_prefix("fn"),
             fn_namespace,
-            analyze_string_result: xot.add_name_ns("analyze-string-result", fn_namespace),
-            match_: xot.add_name_ns("match", fn_namespace),
-            non_match: xot.add_name_ns("non-match", fn_namespace),
-            group_name: xot.add_name_ns("group", fn_namespace),
-            group_nr: xot.add_name("nr"),
+            analyze_string_result: source.add_name_ns("analyze-string-result", fn_namespace),
+            match_: source.add_name_ns("match", fn_namespace),
+            non_match: source.add_name_ns("non-match", fn_namespace),
+            group_name: source.add_name_ns("group", fn_namespace),
+            group_nr: source.add_name("nr"),
         }
     }
 }
 
-fn analyze_string(
-    interpreter: &mut Interpreter,
+fn analyze_string<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
     input: Option<&str>,
     pattern: &str,
     flags: &str,
-) -> error::Result<sequence::Sequence> {
+) -> error::Result<sequence::Sequence<S::Node>> {
     let regex = interpreter.regex(pattern, flags)?;
     let input = input.unwrap_or("");
     let analyze_results = regex.analyze(input)?;
 
-    let xot = interpreter.state.xot_mut();
+    let source = interpreter.state.source_mut();
     // TODO: do this somewhere on startup time so we don't need to do it for each
     // call
-    let analyze_string_names = AnalyzeStringNames::new(xot);
+    let analyze_string_names = AnalyzeStringNames::new(source);
 
-    let analyze_string_result = xot.new_element(analyze_string_names.analyze_string_result);
-    let mut namespaces = xot.namespaces_mut(analyze_string_result);
+    let analyze_string_result = source.new_element(analyze_string_names.analyze_string_result);
+    let mut namespaces = source.namespaces_mut(analyze_string_result);
     namespaces.insert(
         analyze_string_names.fn_prefix,
         analyze_string_names.fn_namespace,
     );
+    drop(namespaces);
     for entry in analyze_results {
         let child = match entry {
             AnalyzeEntry::Match(match_entries) => {
-                let match_node = xot.new_element(analyze_string_names.match_);
-                serialize_match_entries(xot, &analyze_string_names, match_node, &match_entries);
+                let match_node = source.new_element(analyze_string_names.match_);
+                serialize_match_entries(source, &analyze_string_names, match_node, &match_entries);
                 match_node
             }
             AnalyzeEntry::NonMatch(s) => {
-                let non_match_node = xot.new_element(analyze_string_names.non_match);
-                let text = xot.new_text(&s);
-                xot.append(non_match_node, text).unwrap();
+                let non_match_node = source.new_element(analyze_string_names.non_match);
+                let text = source.new_text(&s);
+                source.append(non_match_node, text).unwrap();
                 non_match_node
             }
         };
-        xot.append(analyze_string_result, child).unwrap();
+        source.append(analyze_string_result, child).unwrap();
     }
-    let item: sequence::Item = analyze_string_result.into();
-    let sequence: sequence::Sequence = item.into();
+    let item: sequence::Item<_> = XmlNodeWrapper(analyze_string_result).into();
+    let sequence: sequence::Sequence<_> = item.into();
     Ok(sequence)
 }
 
-fn serialize_match_entries(
-    xot: &mut Xot,
-    analyze_string_names: &AnalyzeStringNames,
-    node: xot::Node,
+fn serialize_match_entries<S: XmlDS>(
+    source: &mut S,
+    analyze_string_names: &AnalyzeStringNames<S>,
+    node: S::Node,
     match_entries: &[MatchEntry],
 ) {
     for entry in match_entries {
         let child = match entry {
-            MatchEntry::String(s) => xot.new_text(s),
+            MatchEntry::String(s) => source.new_text(s),
             MatchEntry::Group { nr, value } => {
-                let group = xot.new_element(analyze_string_names.group_name);
-                let mut attributes = xot.attributes_mut(group);
+                let group = source.new_element(analyze_string_names.group_name);
+                let mut attributes = source.attributes_mut(group);
                 attributes.insert(analyze_string_names.group_nr, nr.to_string());
-                serialize_match_entries(xot, analyze_string_names, group, value);
+                drop(attributes);
+                serialize_match_entries(source, analyze_string_names, group, value);
                 group
             }
         };
-        xot.append(node, child).unwrap();
+        source.append(node, child).unwrap();
     }
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     let mut r = vec![
-        wrap_xpath_fn!(codepoints_to_string),
-        wrap_xpath_fn!(string_to_codepoints),
-        wrap_xpath_fn!(compare),
-        wrap_xpath_fn!(codepoint_equal),
-        wrap_xpath_fn!(contains_token),
-        wrap_xpath_fn!(string_join),
-        wrap_xpath_fn!(string_join_sep),
-        wrap_xpath_fn!(substring2),
-        wrap_xpath_fn!(substring3),
-        wrap_xpath_fn!(string_length),
-        wrap_xpath_fn!(normalize_space),
-        wrap_xpath_fn!(normalize_unicode1),
-        wrap_xpath_fn!(normalize_unicode2),
-        wrap_xpath_fn!(upper_case),
-        wrap_xpath_fn!(lower_case),
-        wrap_xpath_fn!(translate),
-        wrap_xpath_fn!(contains),
-        wrap_xpath_fn!(starts_with),
-        wrap_xpath_fn!(ends_with),
-        wrap_xpath_fn!(substring_before),
-        wrap_xpath_fn!(substring_after),
-        wrap_xpath_fn!(tokenize1),
-        wrap_xpath_fn!(matches2),
-        wrap_xpath_fn!(matches3),
-        wrap_xpath_fn!(replace3),
-        wrap_xpath_fn!(replace4),
-        wrap_xpath_fn!(tokenize3),
-        wrap_xpath_fn!(tokenize2),
-        wrap_xpath_fn!(analyze_string2),
-        wrap_xpath_fn!(analyze_string3),
+        wrap_xpath_fn!(codepoints_to_string, S),
+        wrap_xpath_fn!(string_to_codepoints, S),
+        wrap_xpath_fn!(compare, S),
+        wrap_xpath_fn!(codepoint_equal, S),
+        wrap_xpath_fn!(contains_token, S),
+        wrap_xpath_fn!(string_join, S),
+        wrap_xpath_fn!(string_join_sep, S),
+        wrap_xpath_fn!(substring2, S),
+        wrap_xpath_fn!(substring3, S),
+        wrap_xpath_fn!(string_length, S),
+        wrap_xpath_fn!(normalize_space, S),
+        wrap_xpath_fn!(normalize_unicode1, S),
+        wrap_xpath_fn!(normalize_unicode2, S),
+        wrap_xpath_fn!(upper_case, S),
+        wrap_xpath_fn!(lower_case, S),
+        wrap_xpath_fn!(translate, S),
+        wrap_xpath_fn!(contains, S),
+        wrap_xpath_fn!(starts_with, S),
+        wrap_xpath_fn!(ends_with, S),
+        wrap_xpath_fn!(substring_before, S),
+        wrap_xpath_fn!(substring_after, S),
+        wrap_xpath_fn!(tokenize1, S),
+        wrap_xpath_fn!(matches2, S),
+        wrap_xpath_fn!(matches3, S),
+        wrap_xpath_fn!(replace3, S),
+        wrap_xpath_fn!(replace4, S),
+        wrap_xpath_fn!(tokenize3, S),
+        wrap_xpath_fn!(tokenize2, S),
+        wrap_xpath_fn!(analyze_string2, S),
+        wrap_xpath_fn!(analyze_string3, S),
     ];
     // register concat for a variety of arities
     // the spec leaves the amount of arguments indefinite
@@ -785,7 +788,7 @@ pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
             vec![Some(arg_type.clone()); arity],
             Some(string_type.clone()),
         );
-        r.push(StaticFunctionDescription {
+        r.push(StaticFunctionDescription::<S> {
             name: name.clone(),
             signature,
             function_kind: None,

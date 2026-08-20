@@ -1,7 +1,7 @@
 use syn::{
     parse::{Parse, ParseStream},
     token::Comma,
-    LitStr, Result,
+    Ident, LitStr, Result,
 };
 
 use xee_xpath_ast::ast::Signature;
@@ -12,6 +12,7 @@ pub(crate) struct XPathFnOptions {
     pub(crate) signature: Signature,
     pub(crate) kind: Option<String>,
     pub(crate) signature_string: String,
+    pub(crate) xmlds: Option<Ident>,
 }
 
 mod kw {
@@ -22,6 +23,7 @@ mod kw {
     syn::custom_keyword!(size);
     syn::custom_keyword!(collation);
     syn::custom_keyword!(anonymous_closure);
+    syn::custom_keyword!(datasource);
 }
 
 impl Parse for XPathFnOptions {
@@ -36,6 +38,7 @@ impl Parse for XPathFnOptions {
 
         let mut signature: Option<String> = None;
         let mut kind: Option<String> = None;
+        let mut xmlds: Option<Ident> = None;
         for option in options {
             match option {
                 XPathFnOption::Signature(signature_option) => {
@@ -44,6 +47,7 @@ impl Parse for XPathFnOptions {
                 XPathFnOption::Kind(kind_option) => {
                     kind = Some(kind_option);
                 }
+                XPathFnOption::XmlDS(ds_ident) => xmlds = Some(ds_ident),
             }
         }
         let signature_string = signature.expect("Signature not found");
@@ -54,6 +58,7 @@ impl Parse for XPathFnOptions {
             signature,
             kind,
             signature_string,
+            xmlds,
         })
     }
 }
@@ -61,6 +66,7 @@ impl Parse for XPathFnOptions {
 enum XPathFnOption {
     Signature(String),
     Kind(String),
+    XmlDS(Ident),
 }
 
 impl Parse for XPathFnOption {
@@ -87,6 +93,11 @@ impl Parse for XPathFnOption {
         } else if lookahead.peek(kw::anonymous_closure) {
             let _eat: kw::anonymous_closure = input.parse()?;
             XPathFnOption::Kind("anonymous_closure".to_string())
+        } else if lookahead.peek(kw::datasource) {
+            let _eat: kw::datasource = input.parse()?;
+            let _eat: syn::token::Eq = input.parse()?;
+            let ds: Ident = input.parse()?;
+            XPathFnOption::XmlDS(ds)
         } else if lookahead.peek(LitStr) {
             let string_literal: LitStr = input.parse()?;
             let signature = string_literal.value();

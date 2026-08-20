@@ -1,9 +1,10 @@
 use std::hint::black_box;
 
 use xee_xpath::{Documents, Queries, Query};
+use xot::Xot;
 
 fn main() {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
 
     let queries = Queries::default();
     let q = queries

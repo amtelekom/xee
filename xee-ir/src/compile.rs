@@ -1,4 +1,5 @@
 use ahash::HashMapExt;
+use xee_interpreter::function::XmlDS;
 use xee_interpreter::{context::StaticContext, error::SpannedResult, interpreter::Program};
 
 use crate::{
@@ -6,7 +7,10 @@ use crate::{
     ir, FunctionBuilder, FunctionCompiler, Scopes,
 };
 
-pub fn compile_xpath(expr: ir::ExprS, static_context: StaticContext) -> SpannedResult<Program> {
+pub fn compile_xpath<S: XmlDS>(
+    expr: ir::ExprS,
+    static_context: StaticContext<S>,
+) -> SpannedResult<Program<S>> {
     let mut program = Program::new(static_context, expr.span);
     let mut scopes = Scopes::new();
     let builder = FunctionBuilder::new(&mut program);
@@ -16,10 +20,10 @@ pub fn compile_xpath(expr: ir::ExprS, static_context: StaticContext) -> SpannedR
     Ok(program)
 }
 
-pub fn compile_xslt(
+pub fn compile_xslt<S: XmlDS>(
     declarations: ir::Declarations,
-    static_context: StaticContext,
-) -> SpannedResult<Program> {
+    static_context: StaticContext<S>,
+) -> SpannedResult<Program<S>> {
     let mut program = Program::new(static_context, (0..0).into());
     let mut compiler = DeclarationCompiler::new(&mut program);
     compiler.compile_declarations(&declarations)?;

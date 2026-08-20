@@ -1,6 +1,7 @@
 use divan::{black_box, Bencher};
 
 use xee_xpath::{Documents, Queries, Query};
+use xot::Xot;
 
 fn main() {
     divan::main();
@@ -11,7 +12,7 @@ fn range(bencher: Bencher) {
     let queries = Queries::default();
     let mut q = queries.sequence("1 to 1000").unwrap();
 
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
 
     bencher.bench_local(move || {
         black_box(&mut q)
@@ -25,7 +26,7 @@ fn string_concat(bencher: Bencher) {
     let queries = Queries::default();
     let mut q = queries.sequence("concat('foo', 'bar')").unwrap();
 
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
 
     bencher.bench_local(move || {
         black_box(&mut q)
@@ -36,7 +37,7 @@ fn string_concat(bencher: Bencher) {
 
 #[divan::bench]
 fn string_value(bencher: Bencher) {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let handle = documents
         .add_string_without_uri("<doc>Hello world</doc>")
         .unwrap();
@@ -51,7 +52,7 @@ fn string_value(bencher: Bencher) {
 
 #[divan::bench]
 fn large_map(bencher: Bencher) {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
 
     let queries = Queries::default();
     let mut q = queries
@@ -67,7 +68,7 @@ fn large_map(bencher: Bencher) {
 
 #[divan::bench]
 fn element_with_attribute(bencher: Bencher) {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     // large document doc with 1000 p elements where even elements have the
     // attribute state='even' and odd elements have the attribute state='odd'
     let mut doc = String::from("<doc>");

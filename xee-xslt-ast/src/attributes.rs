@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use ahash::{HashSet, HashSetExt};
 use rust_decimal::Decimal;
+use xee_datasource::{Element, SpanInfoKey, XmlAttribAccess, XmlDS};
 use xee_xpath_ast::{ast as xpath_ast, parse_item_type, parse_name, parse_sequence_type};
 
 use crate::ast_core as ast;
@@ -11,17 +12,16 @@ use crate::name::XmlName;
 use crate::names::StandardNames;
 use crate::tokenize::split_whitespace_with_spans;
 use crate::{ast_core::Span, value_template::ValueTemplateTokenizer};
-use xot::{NameId, SpanInfoKey};
 
 #[derive(Clone)]
-pub(crate) struct Attributes<'a> {
-    pub(crate) content: Content<'a>,
-    pub(crate) element: &'a xot::Element,
-    seen: std::cell::RefCell<HashSet<NameId>>,
+pub(crate) struct Attributes<'a, S: XmlDS> {
+    pub(crate) content: Content<'a, S>,
+    pub(crate) element: &'a S::Element,
+    seen: std::cell::RefCell<HashSet<S::NameId>>,
 }
 
-impl<'a> Attributes<'a> {
-    pub(crate) fn new(content: Content<'a>, element: &'a xot::Element) -> Self {
+impl<'a, S: XmlDS> Attributes<'a, S> {
+    pub(crate) fn new(content: Content<'a, S>, element: &'a S::Element) -> Self {
         Self {
             content,
             element,
@@ -34,7 +34,7 @@ impl<'a> Attributes<'a> {
         let content = self.content.with_context(
             self.content
                 .context
-                .with_standard(self.content.xot_namespaces(), self.standard()?),
+                .with_standard(self.content.source_namespaces(), self.standard()?),
         );
         // we now create a new attributes object that has the new content
         Ok(Self { content, ..self })
@@ -45,7 +45,7 @@ impl<'a> Attributes<'a> {
         let content = self.content.with_context(
             self.content
                 .context
-                .with_static_standard(self.content.xot_namespaces(), self.static_standard()?),
+                .with_static_standard(self.content.source_namespaces(), self.static_standard()?),
         );
         // we now create a new attributes object that has the new content
         Ok(Self { content, ..self })
@@ -53,13 +53,13 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn optional<T>(
         &self,
-        name: NameId,
-        parse_value: impl Fn(&'a str, Span) -> Result<T, AttributeError>,
+        name: S::NameId,
+        parse_value: impl Fn(&str, Span) -> Result<T, AttributeError>,
     ) -> Result<Option<T>, AttributeError> {
         self.seen.borrow_mut().insert(name);
         if let Some(value) = self.content.xot_attributes().get(name) {
             let span = self.value_span(name)?;
-            let value = parse_value(value, span).map_err(|e| {
+            let value = parse_value(value.as_ref(), span).map_err(|e| {
                 if let AttributeError::XPathParser(e) = e {
                     AttributeError::XPathParser(e.adjust(span.start))
                 } else {
@@ -74,11 +74,11 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn required<T>(
         &self,
-        name: NameId,
-        parse_value: impl Fn(&'a str, Span) -> Result<T, AttributeError>,
+        name: S::NameId,
+        parse_value: impl Fn(&str, Span) -> Result<T, AttributeError>,
     ) -> Result<T, AttributeError> {
         self.optional(name, parse_value)?.ok_or_else(|| {
-            let (local, namespace) = self.content.state.xot.name_ns_str(name);
+            let (local, namespace) = self.content.state.source.name_ns_str(name);
             let span = match self.span() {
                 Ok(span) => span,
                 Err(e) => return e,
@@ -102,17 +102,18 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn boolean_with_default(
         &self,
-        name: NameId,
+        name: S::NameId,
         default: bool,
     ) -> Result<bool, AttributeError> {
         self.optional(name, Self::_boolean)
             .map(|v| v.unwrap_or(default))
     }
 
-    pub(crate) fn unseen_attributes(&self) -> Vec<NameId> {
+    pub(crate) fn unseen_attributes(&self) -> Vec<S::NameId> {
         let mut result = Vec::new();
         let seen = self.seen.borrow();
-        for name in self.content.state.xot.attributes(self.content.node).keys() {
+        let attribs = self.content.state.source.attributes(self.content.node);
+        for name in attribs.keys() {
             if !seen.contains(&name) {
                 result.push(name);
             }
@@ -143,14 +144,16 @@ impl<'a> Attributes<'a> {
         }
     }
 
-    pub(crate) fn boolean(&self) -> impl Fn(&'a str, Span) -> Result<bool, AttributeError> + '_ {
+    pub(crate) fn boolean(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<bool, AttributeError> + '_ + use<'_, 'a, S> {
         Self::_boolean
     }
 
     pub(crate) fn value_template<T>(
         &self,
-        _parse_value: impl Fn(&'a str, Span) -> Result<T, AttributeError> + 'a,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::ValueTemplate<T>, AttributeError> + '_
+        _parse_value: impl for<'b> Fn(&'b str, Span) -> Result<T, AttributeError> + 'a,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::ValueTemplate<T>, AttributeError> + '_
     where
         T: Clone + PartialEq + Eq,
     {
@@ -170,7 +173,7 @@ impl<'a> Attributes<'a> {
         }
     }
 
-    fn value_span(&self, name: NameId) -> Result<Span, AttributeError> {
+    fn value_span(&self, name: S::NameId) -> Result<Span, AttributeError> {
         let span = self
             .content
             .state
@@ -183,7 +186,7 @@ impl<'a> Attributes<'a> {
     pub(crate) fn in_xsl_namespace(&self) -> bool {
         self.content
             .state
-            .xot
+            .source
             .namespace_for_name(self.element.name())
             == self.content.state.names.xsl_ns
     }
@@ -212,7 +215,7 @@ impl<'a> Attributes<'a> {
         }
     }
 
-    fn _standard(&self, names: &StandardNames) -> Result<ast::Standard, AttributeError> {
+    fn _standard(&self, names: &StandardNames<S>) -> Result<ast::Standard, AttributeError> {
         Ok(ast::Standard {
             default_collation: self.optional(names.default_collation, self.uris())?,
             default_mode: self.optional(names.default_mode, self.default_mode())?,
@@ -233,7 +236,7 @@ impl<'a> Attributes<'a> {
 
     fn _static_standard(
         &self,
-        names: &StandardNames,
+        names: &StandardNames<S>,
     ) -> Result<ast::StaticStandard, AttributeError> {
         Ok(ast::StaticStandard {
             xpath_default_namespace: self.optional(names.xpath_default_namespace, self.uri())?,
@@ -246,7 +249,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn qname(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::QName, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::QName, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_qname
     }
 
@@ -256,7 +260,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn ncname(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::NcName, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::NcName, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_ncname
     }
 
@@ -264,7 +269,10 @@ impl<'a> Attributes<'a> {
         Ok(s.to_string())
     }
 
-    pub(crate) fn id(&self) -> impl Fn(&'a str, Span) -> Result<ast::Id, AttributeError> + '_ {
+    pub(crate) fn id(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Id, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_id
     }
 
@@ -281,7 +289,9 @@ impl<'a> Attributes<'a> {
         })
     }
 
-    pub(crate) fn char(&self) -> impl Fn(&'a str, Span) -> Result<char, AttributeError> {
+    pub(crate) fn char(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<char, AttributeError> + use<'_, 'a, S> {
         Self::_char
     }
 
@@ -289,7 +299,10 @@ impl<'a> Attributes<'a> {
         Ok(s.to_string())
     }
 
-    pub(crate) fn string(&self) -> impl Fn(&'a str, Span) -> Result<String, AttributeError> + '_ {
+    pub(crate) fn string(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<String, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_string
     }
 
@@ -307,7 +320,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn eqname(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<xpath_ast::Name, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<xpath_ast::Name, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._eqname(s, span)
     }
 
@@ -321,7 +335,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn eqnames(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<Vec<xpath_ast::Name>, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<Vec<xpath_ast::Name>, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         |s, span| self._eqnames(s, span)
     }
 
@@ -353,7 +369,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn modes(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<Vec<ast::ModeValue>, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<Vec<ast::ModeValue>, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         |s, span| self._modes(s, span)
     }
 
@@ -381,13 +399,15 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn apply_templates_mode(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::ApplyTemplatesModeValue, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::ApplyTemplatesModeValue, AttributeError> + '_
+    {
         |s, span| self._apply_templates_mode(s, span)
     }
 
     pub(crate) fn token(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Token, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Token, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_token
     }
 
@@ -397,7 +417,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn nmtoken(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::NmToken, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::NmToken, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_nmtoken
     }
 
@@ -411,7 +432,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn tokens(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<Vec<ast::Token>, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<Vec<ast::Token>, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_tokens
     }
 
@@ -420,7 +442,10 @@ impl<'a> Attributes<'a> {
         Ok(s.to_string())
     }
 
-    pub(crate) fn uri(&self) -> impl Fn(&'a str, Span) -> Result<ast::Uri, AttributeError> + '_ {
+    pub(crate) fn uri(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Uri, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_uri
     }
 
@@ -434,7 +459,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn uris(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<Vec<ast::Uri>, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<Vec<ast::Uri>, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_uris
     }
 
@@ -448,7 +474,9 @@ impl<'a> Attributes<'a> {
         }
     }
 
-    pub(crate) fn integer(&self) -> impl Fn(&'a str, Span) -> Result<usize, AttributeError> + '_ {
+    pub(crate) fn integer(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<usize, AttributeError> + '_ + use<'_, 'a, S> {
         Self::_integer
     }
 
@@ -462,7 +490,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn default_mode(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::DefaultMode, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::DefaultMode, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._default_mode(s, span)
     }
 
@@ -479,7 +508,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn default_validation(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::DefaultValidation, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::DefaultValidation, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         Self::_default_validation
     }
 
@@ -490,7 +521,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn prefix(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Prefix, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Prefix, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_prefix
     }
 
@@ -504,7 +536,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn prefix_or_default(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::PrefixOrDefault, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::PrefixOrDefault, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         Self::_prefix_or_default
     }
 
@@ -518,7 +552,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn prefixes(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<Vec<ast::Prefix>, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<Vec<ast::Prefix>, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_prefixes
     }
 
@@ -550,7 +585,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn exclude_result_prefixes(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::ExcludeResultPrefixes, AttributeError> {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::ExcludeResultPrefixes, AttributeError> + use<'a, S>
+    {
         Self::_exclude_result_prefixes
     }
 
@@ -563,7 +599,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn xpath(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Expression, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Expression, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._xpath(s, span)
     }
 
@@ -576,7 +613,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn pattern(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Pattern, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Pattern, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._pattern(s, span)
     }
 
@@ -593,7 +631,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn sequence_type(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<xpath_ast::SequenceType, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<xpath_ast::SequenceType, AttributeError> + '_
+    {
         |s, span| self._sequence_type(s, span)
     }
 
@@ -606,7 +645,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn item_type(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<xpath_ast::ItemType, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<xpath_ast::ItemType, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         |s, span| self._item_type(s, span)
     }
 
@@ -617,7 +658,10 @@ impl<'a> Attributes<'a> {
         })
     }
 
-    pub(crate) fn decimal(&self) -> impl Fn(&'a str, Span) -> Result<Decimal, AttributeError> + '_ {
+    pub(crate) fn decimal(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<Decimal, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_decimal
     }
 
@@ -637,7 +681,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn method(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::OutputMethod, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::OutputMethod, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._method(s, span)
     }
 
@@ -659,7 +704,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn json_node_output_method(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::JsonNodeOutputMethod, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::JsonNodeOutputMethod, AttributeError> + '_
+    {
         |s, span| self._json_node_output_method(s, span)
     }
 
@@ -675,7 +721,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn data_type(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::DataType, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::DataType, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._data_type(s, span)
     }
 
@@ -696,7 +743,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn streamability(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Streamability, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Streamability, AttributeError> + '_ + use<'_, 'a, S>
+    {
         |s, span| self._streamability(s, span)
     }
 
@@ -717,7 +765,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn input_type_annotations(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::InputTypeAnnotations, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::InputTypeAnnotations, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         Self::_input_type_annotations
     }
 
@@ -734,7 +784,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn phase(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::AccumulatorPhase, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::AccumulatorPhase, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         Self::_phase
     }
 
@@ -757,7 +809,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn component(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Component, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Component, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_component
     }
 
@@ -777,7 +830,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn visibility(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Visibility, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Visibility, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_visibility
     }
 
@@ -801,7 +855,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn visibility_with_abstract(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::VisibilityWithAbstract, AttributeError> {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::VisibilityWithAbstract, AttributeError> + use<'a, S>
+    {
         Self::_visibility_with_abstract
     }
 
@@ -825,7 +880,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn visibility_with_hidden(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::VisibilityWithHidden, AttributeError> {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::VisibilityWithHidden, AttributeError> + use<'a, S>
+    {
         Self::_visibility_with_hidden
     }
 
@@ -846,7 +902,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn validation(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Validation, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Validation, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_validation
     }
 
@@ -869,7 +926,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn on_no_match(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::OnNoMatch, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::OnNoMatch, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_on_no_match
     }
 
@@ -888,7 +946,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn on_multiple_match(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::OnMultipleMatch, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::OnMultipleMatch, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         Self::_on_multiple_match
     }
 
@@ -909,7 +969,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn typed(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Typed, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Typed, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_typed
     }
 
@@ -929,7 +990,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn level(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::NumberLevel, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::NumberLevel, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_level
     }
 
@@ -948,7 +1010,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn letter_value(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::LetterValue, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::LetterValue, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_letter_value
     }
 
@@ -970,7 +1033,9 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn normalization_form(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::NormalizationForm, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::NormalizationForm, AttributeError>
+           + '_
+           + use<'_, 'a, S> {
         |s, span| self._normalization_form(s, span)
     }
 
@@ -988,7 +1053,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn standalone(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Standalone, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Standalone, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_standalone
     }
 
@@ -999,7 +1065,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn language(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Language, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Language, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_language
     }
 
@@ -1018,7 +1085,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn order(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::Order, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Order, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_order
     }
 
@@ -1037,7 +1105,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn case_order(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::CaseOrder, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::CaseOrder, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_case_order
     }
     fn _use(s: &str, span: Span) -> Result<ast::Use, AttributeError> {
@@ -1054,7 +1123,9 @@ impl<'a> Attributes<'a> {
         }
     }
 
-    pub(crate) fn use_(&self) -> impl Fn(&'a str, Span) -> Result<ast::Use, AttributeError> {
+    pub(crate) fn use_(
+        &self,
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::Use, AttributeError> + use<'a, S> {
         Self::_use
     }
 
@@ -1074,7 +1145,8 @@ impl<'a> Attributes<'a> {
 
     pub(crate) fn new_each_time(
         &self,
-    ) -> impl Fn(&'a str, Span) -> Result<ast::NewEachTime, AttributeError> + '_ {
+    ) -> impl for<'b> Fn(&'b str, Span) -> Result<ast::NewEachTime, AttributeError> + '_ + use<'_, 'a, S>
+    {
         Self::_new_each_time
     }
 }

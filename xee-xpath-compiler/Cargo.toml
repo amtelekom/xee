@@ -16,6 +16,7 @@ serde = ["xee-xpath-ast/serde", "xee-interpreter/serde"]
 
 [dependencies]
 xee-xpath-ast = { path = "../xee-xpath-ast", version = "0.1.4" }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }
 xee-schema-type = { path = "../xee-schema-type", version = "0.1.4" }
 xee-interpreter = { path = "../xee-interpreter", version = "0.2.0" }
 xee-ir = { path = "../xee-ir", version = "0.1.5" }
@@ -24,9 +25,9 @@ ordered-float = { workspace = true }
 rust_decimal = { workspace = true }
 ibig = { workspace = true }
 thiserror = { workspace = true }
-xot = { workspace = true }
 iri-string = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml", "glob"] }
 rust_decimal_macros = { workspace = true }
+xot = { workspace = true }

@@ -4,6 +4,8 @@ use xee_xpath::{context::Variables, error, Atomic, Item, Sequence};
 mod common;
 
 use common::{assert_nodes, run, run_with_variables, run_xml, run_xml_default_ns, run_xml_with_ns};
+use xee_datasource::xmlname::OwnedName;
+use xot::{Node, Xot};
 
 #[test]
 fn test_compile_add() {
@@ -711,12 +713,12 @@ fn test_attribute_predicate() -> error::Result<()> {
 
 #[test]
 fn test_external_variable() {
-    let item: Item = "FOO".into();
-    let sequence: Sequence = item.into();
+    let item: Item<Node> = "FOO".into();
+    let sequence: Sequence<Node> = item.into();
     assert_debug_snapshot!(run_with_variables(
         "$foo",
-        Variables::from([(
-            xot::xmlname::OwnedName::new("foo".to_string(), "".to_string(), "".to_string()),
+        Variables::<Xot>::from([(
+            OwnedName::new("foo".to_string(), "".to_string(), "".to_string()),
             sequence
         )]),
     ))
@@ -726,13 +728,13 @@ fn test_external_variable() {
 fn test_external_variables() {
     assert_debug_snapshot!(run_with_variables(
         "$foo + $bar",
-        Variables::from([
+        Variables::<Xot>::from([
             (
-                xot::xmlname::OwnedName::new("foo".to_string(), "".to_string(), "".to_string()),
+                OwnedName::new("foo".to_string(), "".to_string(), "".to_string()),
                 Item::from(Atomic::from(1i64)).into()
             ),
             (
-                xot::xmlname::OwnedName::new("bar".to_string(), "".to_string(), "".to_string()),
+                OwnedName::new("bar".to_string(), "".to_string(), "".to_string()),
                 Item::from(Atomic::from(2i64)).into()
             )
         ])

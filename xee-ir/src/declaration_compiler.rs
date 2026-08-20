@@ -1,5 +1,6 @@
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use rust_decimal::Decimal;
+use xee_interpreter::function::XmlDS;
 use xee_interpreter::pattern::ModeId;
 use xee_xpath_ast::Pattern;
 
@@ -30,16 +31,16 @@ impl RuleBuilder {
 
 pub type ModeIds = HashMap<ir::ApplyTemplatesModeValue, ModeId>;
 
-pub struct DeclarationCompiler<'a> {
-    program: &'a mut interpreter::Program,
+pub struct DeclarationCompiler<'a, S: XmlDS> {
+    program: &'a mut interpreter::Program<S>,
     scopes: Scopes,
     rule_declaration_order: i64,
     rule_builders: HashMap<ir::ModeValue, Vec<RuleBuilder>>,
     mode_ids: ModeIds,
 }
 
-impl<'a> DeclarationCompiler<'a> {
-    pub fn new(program: &'a mut interpreter::Program) -> Self {
+impl<'a, S: XmlDS> DeclarationCompiler<'a, S> {
+    pub fn new(program: &'a mut interpreter::Program<S>) -> Self {
         Self {
             program,
             scopes: Scopes::new(),
@@ -49,7 +50,7 @@ impl<'a> DeclarationCompiler<'a> {
         }
     }
 
-    fn function_compiler(&mut self) -> FunctionCompiler<'_> {
+    fn function_compiler(&mut self) -> FunctionCompiler<'_, S> {
         let function_builder = FunctionBuilder::new(self.program);
         FunctionCompiler::new(function_builder, &mut self.scopes, &self.mode_ids)
     }

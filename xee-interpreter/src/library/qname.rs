@@ -1,8 +1,7 @@
 // https://www.w3.org/TR/xpath-functions-31/#QName-funcs
 
 use ahash::HashMap;
-use xot::xmlname::NameStrInfo;
-use xot::Xot;
+use xee_datasource::xmlname::NameStrInfo;
 
 use xee_name::{Name, Namespaces};
 use xee_xpath_ast::parse_name;
@@ -11,20 +10,21 @@ use xee_xpath_macros::xpath_fn;
 use crate::atomic;
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("fn:resolve-QName($qname as xs:string?, $element as element()) as xs:QName?")]
-fn resolve_qname(
-    interpreter: &Interpreter,
+fn resolve_qname<S: XmlDS>(
+    interpreter: &Interpreter<S>,
     qname: Option<&str>,
-    node: xot::Node,
+    node: S::Node,
 ) -> error::Result<Option<atomic::Atomic>> {
     if let Some(qname) = qname {
         // TODO: we could make this more efficient if we could have a parser state
         // that used NamespaceLookup instead of Namespaces, but that requires a lot
         // of generics we're not ready for at this point.
-        let namespaces = element_namespaces(node, interpreter.xot());
+        let namespaces = element_namespaces(node, interpreter.source());
         let name = parse_name(qname, &namespaces)?.value;
         // parse_name doesn't put in the default namespace if necessary, so we do it here
         let name = name.with_default_namespace(namespaces.default_element_namespace());
@@ -34,21 +34,21 @@ fn resolve_qname(
     }
 }
 
-fn element_namespaces(node: xot::Node, xot: &Xot) -> Namespaces {
+fn element_namespaces<S: XmlDS>(node: S::Node, source: &S) -> Namespaces {
     let mut m = HashMap::default();
 
     let mut default_element_namespace = "";
 
-    for (prefix_id, namespace_id) in xot.namespaces_in_scope(node) {
-        let prefix = xot.prefix_str(prefix_id).to_string();
+    for (prefix_id, namespace_id) in source.namespaces_in_scope(node) {
+        let prefix = source.prefix_str(prefix_id).to_string();
         if m.contains_key(&prefix) {
             continue;
         }
-        if xot.empty_prefix() == prefix_id {
-            default_element_namespace = xot.namespace_str(namespace_id);
+        if source.empty_prefix() == prefix_id {
+            default_element_namespace = source.namespace_str(namespace_id);
             // we don't continue as we want the empty prefix to be in the map
         }
-        let namespace = xot.namespace_str(namespace_id).to_string();
+        let namespace = source.namespace_str(namespace_id).to_string();
         m.insert(prefix, namespace);
     }
 
@@ -140,16 +140,16 @@ fn namespace_uri_from_qname(arg: Option<Name>) -> error::Result<Option<atomic::A
 #[xpath_fn(
     "fn:namespace-uri-for-prefix($prefix as xs:string?, $element as element()) as xs:anyURI?"
 )]
-fn namespace_uri_for_prefix(
-    interpreter: &Interpreter,
+fn namespace_uri_for_prefix<S: XmlDS>(
+    interpreter: &Interpreter<S>,
     prefix: Option<&str>,
-    node: xot::Node,
+    node: S::Node,
 ) -> error::Result<Option<atomic::Atomic>> {
     if let Some(prefix) = prefix {
         // TODO: efficiency could be made faster if we used NameSpaceLookup, see
         // resolve-QName
 
-        let namespaces = element_namespaces(node, interpreter.xot());
+        let namespaces = element_namespaces(node, interpreter.source());
         Ok(namespaces
             .by_prefix(prefix)
             .map(|s| atomic::Atomic::String(atomic::StringType::AnyURI, s.to_string().into())))
@@ -159,21 +159,21 @@ fn namespace_uri_for_prefix(
 }
 
 #[xpath_fn("fn:in-scope-prefixes($element as element()) as xs:string*")]
-fn in_scope_prefixes(interpreter: &Interpreter, node: xot::Node) -> Vec<atomic::Atomic> {
-    let xot = interpreter.xot();
+fn in_scope_prefixes<S: XmlDS>(interpreter: &Interpreter<S>, node: S::Node) -> Vec<atomic::Atomic> {
+    let xot = interpreter.source();
     xot.namespaces_in_scope(node)
         .map(|(prefix, _)| xot.prefix_str(prefix).to_string().into())
         .collect::<Vec<_>>()
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(resolve_qname),
-        wrap_xpath_fn!(qname),
-        wrap_xpath_fn!(prefix_from_qname),
-        wrap_xpath_fn!(local_name_from_qname),
-        wrap_xpath_fn!(namespace_uri_from_qname),
-        wrap_xpath_fn!(namespace_uri_for_prefix),
-        wrap_xpath_fn!(in_scope_prefixes),
+        wrap_xpath_fn!(resolve_qname, S),
+        wrap_xpath_fn!(qname, S),
+        wrap_xpath_fn!(prefix_from_qname, S),
+        wrap_xpath_fn!(local_name_from_qname, S),
+        wrap_xpath_fn!(namespace_uri_from_qname, S),
+        wrap_xpath_fn!(namespace_uri_for_prefix, S),
+        wrap_xpath_fn!(in_scope_prefixes, S),
     ]
 }

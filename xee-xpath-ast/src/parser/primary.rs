@@ -1,7 +1,7 @@
 use chumsky::{input::ValueInput, prelude::*};
 use ordered_float::OrderedFloat;
 use std::borrow::Cow;
-use xot::xmlname::NameStrInfo;
+use xee_datasource::xmlname::NameStrInfo;
 
 use xee_xpath_lexer::Token;
 

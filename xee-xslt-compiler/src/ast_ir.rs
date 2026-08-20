@@ -1,33 +1,35 @@
 use ahash::HashSetExt;
 use xee_name::{Name, Namespaces, FN_NAMESPACE};
 
-use xee_interpreter::{context::StaticContext, error, interpreter, sequence::QNameOrString};
+use xee_datasource::xmlname::NameStrInfo;
+use xee_interpreter::{
+    context::StaticContext, error, function::XmlDS, interpreter, sequence::QNameOrString,
+};
 use xee_ir::{compile_xslt, ir, Bindings, Variables};
 use xee_xpath_ast::{ast as xpath_ast, pattern::transform_pattern, span::Spanned};
 use xee_xslt_ast::{ast, error::ElementError, parse_transform};
-use xot::xmlname::NameStrInfo;
 
 use crate::{default_declarations::text_only_copy_declarations, priority::default_priority};
 
-struct IrConverter<'a> {
+struct IrConverter<'a, S: XmlDS> {
     variables: Variables,
-    static_context: &'a StaticContext,
+    static_context: &'a StaticContext<S>,
 }
 
-pub fn compile(
+pub fn compile<S: XmlDS>(
     transform: ast::Transform,
-    static_context: StaticContext,
-) -> error::SpannedResult<interpreter::Program> {
+    static_context: StaticContext<S>,
+) -> error::SpannedResult<interpreter::Program<S>> {
     let mut ir_converter = IrConverter::new(&static_context);
     let declarations = ir_converter.transform(&transform)?;
     compile_xslt(declarations, static_context)
 }
 
-pub fn parse(
-    static_context: StaticContext,
+pub fn parse<S: XmlDS>(
+    static_context: StaticContext<S>,
     xslt: &str,
-) -> error::SpannedResult<interpreter::Program> {
-    let transform = parse_transform(xslt);
+) -> error::SpannedResult<interpreter::Program<S>> {
+    let transform = parse_transform::<S>(xslt);
     // TODO: better error handling
     let mut transform = match transform {
         Ok(transform) => transform,
@@ -45,14 +47,14 @@ pub fn parse(
         }
     };
     // insert default rules early on in precedence order
-    let mut declarations = text_only_copy_declarations().unwrap();
+    let mut declarations = text_only_copy_declarations::<S>().unwrap();
     declarations.extend(transform.declarations);
     transform.declarations = declarations;
     compile(transform, static_context)
 }
 
-impl<'a> IrConverter<'a> {
-    fn new(static_context: &'a StaticContext) -> Self {
+impl<'a, S: XmlDS> IrConverter<'a, S> {
+    fn new(static_context: &'a StaticContext<S>) -> Self {
         IrConverter {
             variables: Variables::new(),
             static_context,

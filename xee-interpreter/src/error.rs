@@ -1,7 +1,7 @@
 use ibig::error::OutOfBoundsError;
 use strum::{Display, EnumMessage};
+use xee_datasource::xmlname::{NameStrInfo, OwnedName};
 use xee_xpath_ast::ParserError;
-use xot::xmlname::NameStrInfo;
 
 use crate::span::SourceSpan;
 
@@ -44,7 +44,7 @@ pub enum Error {
 
     // XPath error conditions: https://www.w3.org/TR/xpath-31/#id-errors
     /// Component absent in static context.
-    ///  
+    ///
     /// It is a static error if analysis of an expression relies on some
     /// component of the static context that is absent.
     XPST0001,
@@ -65,7 +65,7 @@ pub enum Error {
     /// in which the expression occurs, or during the dynamic evaluation phase,
     /// the dynamic type of a value does not match a required type as specified
     /// by the matching rules in 2.5.5 SequenceType Matching.
-    XPTY0004,
+    XPTY0004(&'static str),
     /// Empty Sequence type error.
     ///
     /// During the analysis phase, it is a static error if the static type
@@ -727,7 +727,7 @@ pub enum Error {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ApplicationError {
-    qname: xot::xmlname::OwnedName,
+    qname: OwnedName,
     description: String,
     // FIXME: error object is not supported right now
     // it would require storing an arbitrary sequence in here,
@@ -735,11 +735,11 @@ pub struct ApplicationError {
 }
 
 impl ApplicationError {
-    pub fn new(qname: xot::xmlname::OwnedName, description: String) -> Self {
+    pub fn new(qname: OwnedName, description: String) -> Self {
         Self { qname, description }
     }
 
-    pub fn qname(&self) -> &xot::xmlname::OwnedName {
+    pub fn qname(&self) -> &OwnedName {
         &self.qname
     }
 
@@ -768,10 +768,10 @@ impl Error {
         }
     }
 
-    pub fn code_qname(&self) -> xot::xmlname::OwnedName {
+    pub fn code_qname(&self) -> OwnedName {
         match self {
             Error::Application(application_error) => application_error.qname.clone(),
-            _ => xot::xmlname::OwnedName::new(
+            _ => OwnedName::new(
                 self.code(),
                 "http://www.w3.org/2005/xqt-errors".to_string(),
                 "".to_string(),
@@ -783,6 +783,7 @@ impl Error {
         match self {
             Error::Application(app_error) => app_error.description(),
             Error::Unsupported(reason) => reason,
+            Error::XPTY0004(src) => src,
             _ => self.documentation_pieces().0,
         }
     }
@@ -868,10 +869,10 @@ impl From<regexml::Error> for Error {
     }
 }
 
-impl From<xot::Error> for Error {
-    fn from(e: xot::Error) -> Self {
+impl From<xee_datasource::Error> for Error {
+    fn from(e: xee_datasource::Error) -> Self {
         match e {
-            xot::Error::MissingPrefix(_) => Error::XPST0081,
+            xee_datasource::Error::MissingPrefix(_) => Error::XPST0081,
             // TODO: are there other xot errors that need to be translated?
             _ => Error::XPST0003,
         }

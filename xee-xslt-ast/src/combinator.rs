@@ -1,4 +1,6 @@
-use xot::Node;
+use std::marker::PhantomData;
+
+use xee_datasource::XmlDS;
 
 use crate::content::Content;
 use crate::context::Context;
@@ -7,8 +9,8 @@ use crate::state::State;
 
 type Result<V> = std::result::Result<V, ElementError>;
 
-pub(crate) trait NodeParser<V> {
-    fn parse(&self, node: Option<Node>, state: &State, context: &Context) -> Result<V> {
+pub(crate) trait NodeParser<V, S: XmlDS> {
+    fn parse(&self, node: Option<S::Node>, state: &State<S>, context: &Context<S>) -> Result<V> {
         let (item, next) = self.parse_next(node, state, context)?;
         if let Some(next) = next {
             // we shouldn't have any next item at this point
@@ -20,18 +22,18 @@ pub(crate) trait NodeParser<V> {
         }
     }
 
-    fn parse_content(&self, content: Content) -> Result<V> {
+    fn parse_content(&self, content: Content<S>) -> Result<V> {
         self.parse(Some(content.node), content.state, &content.context)
     }
 
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(V, Option<Node>)>;
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(V, Option<S::Node>)>;
 
-    fn map<O, M>(self, map_func: M) -> MapParser<V, O, Self, M>
+    fn map<O, M>(self, map_func: M) -> MapParser<V, O, Self, M, S>
     where
         Self: Sized,
         M: Fn(V) -> O,
@@ -41,30 +43,33 @@ pub(crate) trait NodeParser<V> {
             map_func,
             v: std::marker::PhantomData,
             o: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 
-    fn option(self) -> OptionParser<V, Self>
+    fn option(self) -> OptionParser<V, Self, S>
     where
         Self: Sized,
     {
         OptionParser {
             parser: self,
             v: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 
-    fn many(self) -> ManyParser<V, Self>
+    fn many(self) -> ManyParser<V, Self, S>
     where
         Self: Sized,
     {
         ManyParser {
             parser: self,
             v: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 
-    fn one_or_more(self) -> OneOrMoreParser<V, Self>
+    fn one_or_more(self) -> OneOrMoreParser<V, Self, S>
     where
         Self: Sized,
     {
@@ -72,34 +77,37 @@ pub(crate) trait NodeParser<V> {
             parser: ManyParser {
                 parser: self,
                 v: std::marker::PhantomData,
+                _source: PhantomData,
             },
         }
     }
 
-    fn flatten<T>(self) -> FlattenParser<T, Self>
+    fn flatten<T>(self) -> FlattenParser<T, Self, S>
     where
-        Self: Sized + NodeParser<Vec<T>>,
+        Self: Sized + NodeParser<Vec<T>, S>,
     {
         FlattenParser {
             parser: ManyParser {
                 parser: self,
 
                 v: std::marker::PhantomData,
+                _source: PhantomData,
             },
         }
     }
 
-    fn contains(self) -> ContainsParser<V, Self>
+    fn contains(self) -> ContainsParser<V, Self, S>
     where
         Self: Sized,
     {
         ContainsParser {
             parser: self,
             t: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 
-    fn then<B, O: NodeParser<B>>(self, other: O) -> CombinedParser<V, B, Self, O>
+    fn then<B, O: NodeParser<B, S>>(self, other: O) -> CombinedParser<V, B, Self, O, S>
     where
         Self: Sized,
     {
@@ -108,10 +116,14 @@ pub(crate) trait NodeParser<V> {
             second: other,
             ta: std::marker::PhantomData,
             tb: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 
-    fn then_ignore<B, O: NodeParser<B>>(self, other: O) -> IgnoreRightCombinedParser<V, B, Self, O>
+    fn then_ignore<B, O: NodeParser<B, S>>(
+        self,
+        other: O,
+    ) -> IgnoreRightCombinedParser<V, B, Self, O, S>
     where
         Self: Sized,
     {
@@ -120,10 +132,11 @@ pub(crate) trait NodeParser<V> {
             second: other,
             ta: std::marker::PhantomData,
             tb: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 
-    fn or<O: NodeParser<V>>(self, other: O) -> OrParser<V, Self, O>
+    fn or<O: NodeParser<V, S>>(self, other: O) -> OrParser<V, Self, O, S>
     where
         Self: Sized,
     {
@@ -131,35 +144,40 @@ pub(crate) trait NodeParser<V> {
             first: self,
             second: other,
             t: std::marker::PhantomData,
+            _source: PhantomData,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OneParser<V, P>
+pub(crate) struct OneParser<V, P, S: XmlDS>
 where
-    P: Fn(Content) -> Result<V>,
+    P: Fn(Content<S>) -> Result<V>,
 {
     parse_value: P,
+    _source: PhantomData<S>,
 }
 
-pub(crate) fn one<V, P>(parse_value: P) -> OneParser<V, P>
+pub(crate) fn one<V, P, S: XmlDS>(parse_value: P) -> OneParser<V, P, S>
 where
-    P: Fn(Content) -> Result<V>,
+    P: Fn(Content<S>) -> Result<V>,
 {
-    OneParser { parse_value }
+    OneParser {
+        parse_value,
+        _source: PhantomData,
+    }
 }
 
-impl<V, P> NodeParser<V> for OneParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<V, S> for OneParser<V, P, S>
 where
-    P: Fn(Content) -> Result<V>,
+    P: Fn(Content<S>) -> Result<V>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(V, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(V, Option<S::Node>)> {
         if let Some(node) = node {
             let content = Content::new(node, state, context.clone());
             let item = (self.parse_value)(content)?;
@@ -171,30 +189,34 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MultiParser<V, P>
+pub(crate) struct MultiParser<V, P, S: XmlDS>
 where
-    P: Fn(Content) -> Result<Vec<V>>,
+    P: Fn(Content<S>) -> Result<Vec<V>>,
 {
     parse_value: P,
+    _source: PhantomData<S>,
 }
 
-pub(crate) fn multi<V, P>(parse_value: P) -> MultiParser<V, P>
+pub(crate) fn multi<V, P, S: XmlDS>(parse_value: P) -> MultiParser<V, P, S>
 where
-    P: Fn(Content) -> Result<Vec<V>>,
+    P: Fn(Content<S>) -> Result<Vec<V>>,
 {
-    MultiParser { parse_value }
+    MultiParser {
+        parse_value,
+        _source: PhantomData,
+    }
 }
 
-impl<V, P> NodeParser<Vec<V>> for MultiParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<Vec<V>, S> for MultiParser<V, P, S>
 where
-    P: Fn(Content) -> Result<Vec<V>>,
+    P: Fn(Content<S>) -> Result<Vec<V>>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(Vec<V>, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(Vec<V>, Option<S::Node>)> {
         if let Some(node) = node {
             let content = Content::new(node, state, context.clone());
             let items = (self.parse_value)(content)?;
@@ -206,52 +228,54 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MapParser<V, O, P, M>
+pub(crate) struct MapParser<V, O, P, M, S: XmlDS>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
     M: Fn(V) -> O,
 {
     parser: P,
     map_func: M,
     v: std::marker::PhantomData<V>,
     o: std::marker::PhantomData<O>,
+    _source: PhantomData<S>,
 }
 
-impl<V, O, P, M> NodeParser<O> for MapParser<V, O, P, M>
+impl<V, O, P, M, S: XmlDS> NodeParser<O, S> for MapParser<V, O, P, M, S>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
     M: Fn(V) -> O,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(O, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(O, Option<S::Node>)> {
         let (item, next) = self.parser.parse_next(node, state, context)?;
         Ok(((self.map_func)(item), next))
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OptionParser<V, P>
+pub(crate) struct OptionParser<V, P, S: XmlDS>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     parser: P,
     v: std::marker::PhantomData<V>,
+    _source: PhantomData<S>,
 }
 
-impl<V, P> NodeParser<Option<V>> for OptionParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<Option<V>, S> for OptionParser<V, P, S>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(Option<V>, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(Option<V>, Option<S::Node>)> {
         match self.parser.parse_next(node, state, context) {
             Ok((item, next)) => Ok((Some(item), next)),
             Err(ElementError::Unexpected { .. }) => Ok((None, node)),
@@ -262,24 +286,25 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ManyParser<V, P>
+pub(crate) struct ManyParser<V, P, S: XmlDS>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     parser: P,
     v: std::marker::PhantomData<V>,
+    _source: PhantomData<S>,
 }
 
-impl<V, P> NodeParser<Vec<V>> for ManyParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<Vec<V>, S> for ManyParser<V, P, S>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(Vec<V>, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(Vec<V>, Option<S::Node>)> {
         let mut result = Vec::new();
         let mut current_node = node;
         loop {
@@ -303,23 +328,23 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OneOrMoreParser<V, P>
+pub(crate) struct OneOrMoreParser<V, P, S: XmlDS>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
-    parser: ManyParser<V, P>,
+    parser: ManyParser<V, P, S>,
 }
 
-impl<V, P> NodeParser<Vec<V>> for OneOrMoreParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<Vec<V>, S> for OneOrMoreParser<V, P, S>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(Vec<V>, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(Vec<V>, Option<S::Node>)> {
         let (items, next) = self.parser.parse_next(node, state, context)?;
         if !items.is_empty() {
             Ok((items, next))
@@ -334,23 +359,23 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct FlattenParser<V, P>
+pub(crate) struct FlattenParser<V, P, S: XmlDS>
 where
-    P: NodeParser<Vec<V>>,
+    P: NodeParser<Vec<V>, S>,
 {
-    parser: ManyParser<Vec<V>, P>,
+    parser: ManyParser<Vec<V>, P, S>,
 }
 
-impl<V, P> NodeParser<Vec<V>> for FlattenParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<Vec<V>, S> for FlattenParser<V, P, S>
 where
-    P: NodeParser<Vec<V>>,
+    P: NodeParser<Vec<V>, S>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(Vec<V>, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(Vec<V>, Option<S::Node>)> {
         let (items, next) = self.parser.parse_next(node, state, context)?;
         let items = items.into_iter().flatten().collect();
         Ok((items, next))
@@ -369,13 +394,13 @@ pub(crate) fn end() -> EndParser {
     EndParser::new()
 }
 
-impl NodeParser<()> for EndParser {
+impl<S: XmlDS> NodeParser<(), S> for EndParser {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        _context: &Context,
-    ) -> Result<((), Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        _context: &Context<S>,
+    ) -> Result<((), Option<S::Node>)> {
         if let Some(node) = node {
             Err(ElementError::Unexpected {
                 span: state.span(node).ok_or(ElementError::Internal)?,
@@ -386,63 +411,74 @@ impl NodeParser<()> for EndParser {
     }
 }
 
-pub(crate) struct CombinedParser<VA, VB, PA: NodeParser<VA>, PB: NodeParser<VB>> {
+pub(crate) struct CombinedParser<VA, VB, PA: NodeParser<VA, S>, PB: NodeParser<VB, S>, S: XmlDS> {
     first: PA,
     second: PB,
     ta: std::marker::PhantomData<VA>,
     tb: std::marker::PhantomData<VB>,
+    _source: PhantomData<S>,
 }
 
-impl<VA, VB, PA: NodeParser<VA>, PB: NodeParser<VB>> NodeParser<(VA, VB)>
-    for CombinedParser<VA, VB, PA, PB>
+impl<VA, VB, PA: NodeParser<VA, S>, PB: NodeParser<VB, S>, S: XmlDS> NodeParser<(VA, VB), S>
+    for CombinedParser<VA, VB, PA, PB, S>
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<((VA, VB), Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<((VA, VB), Option<S::Node>)> {
         let (a, node) = self.first.parse_next(node, state, context)?;
         let (b, node) = self.second.parse_next(node, state, context)?;
         Ok(((a, b), node))
     }
 }
 
-pub(crate) struct IgnoreRightCombinedParser<VA, VB, PA: NodeParser<VA>, PB: NodeParser<VB>> {
+pub(crate) struct IgnoreRightCombinedParser<
+    VA,
+    VB,
+    PA: NodeParser<VA, S>,
+    PB: NodeParser<VB, S>,
+    S: XmlDS,
+> {
     first: PA,
     second: PB,
     ta: std::marker::PhantomData<VA>,
     tb: std::marker::PhantomData<VB>,
+    _source: PhantomData<S>,
 }
 
-impl<VA, VB, PA: NodeParser<VA>, PB: NodeParser<VB>> NodeParser<VA>
-    for IgnoreRightCombinedParser<VA, VB, PA, PB>
+impl<VA, VB, PA: NodeParser<VA, S>, PB: NodeParser<VB, S>, S: XmlDS> NodeParser<VA, S>
+    for IgnoreRightCombinedParser<VA, VB, PA, PB, S>
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(VA, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(VA, Option<S::Node>)> {
         let (a, node) = self.first.parse_next(node, state, context)?;
         let (_b, node) = self.second.parse_next(node, state, context)?;
         Ok((a, node))
     }
 }
 
-pub(crate) struct OrParser<V, PA: NodeParser<V>, PB: NodeParser<V>> {
+pub(crate) struct OrParser<V, PA: NodeParser<V, S>, PB: NodeParser<V, S>, S: XmlDS> {
     first: PA,
     second: PB,
     t: std::marker::PhantomData<V>,
+    _source: PhantomData<S>,
 }
 
-impl<V, PA: NodeParser<V>, PB: NodeParser<V>> NodeParser<V> for OrParser<V, PA, PB> {
+impl<V, PA: NodeParser<V, S>, PB: NodeParser<V, S>, S: XmlDS> NodeParser<V, S>
+    for OrParser<V, PA, PB, S>
+{
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(V, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(V, Option<S::Node>)> {
         // try the first parser, if that works, return result
         // if it isn't working, try the other parser
         let r = self.first.parse_next(node, state, context);
@@ -462,27 +498,28 @@ impl<V, PA: NodeParser<V>, PB: NodeParser<V>> NodeParser<V> for OrParser<V, PA, 
     }
 }
 
-pub(crate) struct ContainsParser<V, P>
+pub(crate) struct ContainsParser<V, P, S: XmlDS>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     parser: P,
     t: std::marker::PhantomData<V>,
+    _source: PhantomData<S>,
 }
 
-impl<V, P> NodeParser<V> for ContainsParser<V, P>
+impl<V, P, S: XmlDS> NodeParser<V, S> for ContainsParser<V, P, S>
 where
-    P: NodeParser<V>,
+    P: NodeParser<V, S>,
 {
     fn parse_next(
         &self,
-        node: Option<Node>,
-        state: &State,
-        context: &Context,
-    ) -> Result<(V, Option<Node>)> {
+        node: Option<S::Node>,
+        state: &State<S>,
+        context: &Context<S>,
+    ) -> Result<(V, Option<S::Node>)> {
         if let Some(node) = node {
             self.parser
-                .parse_next(state.xot.first_child(node), state, context)
+                .parse_next(state.source.first_child(node), state, context)
         } else {
             Err(ElementError::UnexpectedEnd)
         }
@@ -492,6 +529,7 @@ where
 #[cfg(test)]
 mod tests {
     use xot::NameId;
+    use xot::Node;
     use xot::Xot;
 
     use crate::ast_core::Span;
@@ -500,20 +538,20 @@ mod tests {
 
     use super::*;
 
-    fn parse_base(s: &str) -> (State, Context, Node) {
+    fn parse_base(s: &str) -> (State<Xot>, Context<Xot>, Node) {
         let mut xot = Xot::new();
         let names = Names::new(&mut xot);
         let (doc, span_info) = xot.parse_with_span_info(s).unwrap();
         let outer = xot.document_element(doc).unwrap();
         let prefixes = xot.prefixes(outer);
-        let state = State::new(xot, span_info, names);
+        let state = State::new(xot, span_info.into(), names);
         let context = Context::new(prefixes);
         (state, context, outer)
     }
 
-    fn parse_next(s: &str) -> (State, Context, Option<Node>) {
+    fn parse_next(s: &str) -> (State<Xot>, Context<Xot>, Option<Node>) {
         let (state, context, outer) = parse_base(s);
-        let next = state.xot.first_child(outer);
+        let next = state.source.first_child(outer);
         (state, context, next)
     }
 
@@ -548,13 +586,13 @@ mod tests {
     fn test_one_wrong_node() {
         let (mut state, context, next) = parse_next("<outer><b/></outer>");
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         struct Value;
 
         let parser = one(|content| {
-            if let Some(element) = state.xot.element(content.node) {
+            if let Some(element) = state.source.element(content.node) {
                 if element.name() == names.name_a {
                     return Ok(Value);
                 }
@@ -673,13 +711,13 @@ mod tests {
     }
 
     fn parse_two_option(
-        state: &State,
-        context: &Context,
+        state: &State<Xot>,
+        context: &Context<Xot>,
         names: &TestNames,
         next: Option<Node>,
     ) -> Result<(Option<ValueA>, Option<ValueB>)> {
         let optional_parser_a = one(|Content { node, .. }| {
-            if let Some(element) = state.xot.element(node) {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_a {
                     return Ok(ValueA);
                 }
@@ -693,7 +731,7 @@ mod tests {
         let (item_a, next) = optional_parser_a.parse_next(next, state, context).unwrap();
 
         let optional_parser_b = one(|Content { node, .. }| {
-            if let Some(element) = state.xot.element(node) {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
                     return Ok(ValueB);
                 }
@@ -714,7 +752,7 @@ mod tests {
     #[test]
     fn test_two_option_both_present() {
         let (mut state, context, next) = parse_next("<outer><a /><b /></outer>");
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         let (item_a, item_b) = parse_two_option(&state, &context, &names, next).unwrap();
         assert_eq!(item_a, Some(ValueA));
@@ -724,7 +762,7 @@ mod tests {
     #[test]
     fn test_two_option_only_a_present() {
         let (mut state, context, next) = parse_next("<outer><a /></outer>");
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         let (item_a, item_b) = parse_two_option(&state, &context, &names, next).unwrap();
         assert_eq!(item_a, Some(ValueA));
@@ -734,7 +772,7 @@ mod tests {
     #[test]
     fn test_two_option_only_b_present() {
         let (mut state, context, next) = parse_next("<outer><b /></outer>");
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         let (item_a, item_b) = parse_two_option(&state, &context, &names, next).unwrap();
         assert_eq!(item_a, None);
@@ -745,7 +783,7 @@ mod tests {
     fn test_two_option_neither_present() {
         let (mut state, context, next) = parse_next("<outer></outer>");
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         let (item_a, item_b) = parse_two_option(&state, &context, &names, next).unwrap();
         assert_eq!(item_a, None);
@@ -755,7 +793,7 @@ mod tests {
     #[test]
     fn test_two_option_unexpected() {
         let (mut state, context, next) = parse_next("<outer><c /></outer>");
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         let r = parse_two_option(&state, &context, &names, next);
         assert_eq!(
@@ -826,13 +864,13 @@ mod tests {
     fn test_option_then_many() {
         let (mut state, context, next) = parse_next("<outer><a /><b /><b /></outer>");
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         struct Value;
 
-        let option_parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let option_parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_a {
                     return Ok(ValueA);
                 }
@@ -843,8 +881,8 @@ mod tests {
         })
         .option();
 
-        let many_parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let many_parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
                     return Ok(ValueB);
                 }
@@ -867,13 +905,13 @@ mod tests {
     fn test_combine() {
         let (mut state, context, next) = parse_next("<outer><a /><b /><b /></outer>");
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         struct Value;
 
         let option_parser = one(|Content { node, .. }| {
-            if let Some(element) = state.xot.element(node) {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_a {
                     return Ok(ValueA);
                 }
@@ -884,8 +922,8 @@ mod tests {
         })
         .option();
 
-        let many_parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let many_parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
                     return Ok(ValueB);
                 }
@@ -910,13 +948,13 @@ mod tests {
     fn test_combine_3_values() {
         let (mut state, context, next) = parse_next("<outer><a /><b /><b /></outer>");
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         struct Value;
 
-        let option_parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let option_parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_a {
                     return Ok(ValueA);
                 }
@@ -927,8 +965,8 @@ mod tests {
         })
         .option();
 
-        let many_parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let many_parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
                     return Ok(ValueB);
                 }
@@ -955,13 +993,13 @@ mod tests {
     fn test_combine_then_ignore() {
         let (mut state, context, next) = parse_next("<outer><b /><b /></outer>");
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         struct Value;
 
-        let many_parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let many_parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
                     return Ok(ValueB);
                 }
@@ -986,17 +1024,17 @@ mod tests {
     fn test_attribute() {
         let (mut state, context, next) = parse_next(r#"<outer><b foo="FOO"/></outer>"#);
 
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         struct Value {
             foo: String,
         }
 
-        let parser = one(|Content { node, state, .. }| {
-            if let Some(element) = state.xot.element(node) {
+        let parser = one(|Content::<Xot> { node, state, .. }| {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
-                    let value = state.xot.attributes(node).get(names.foo).unwrap();
+                    let value = state.source.attributes(node).get(names.foo).unwrap();
                     return Ok(Value {
                         foo: value.to_string(),
                     });
@@ -1035,7 +1073,7 @@ mod tests {
     #[test]
     fn test_or() {
         let (mut state, context, next) = parse_next("<outer><a/><b/></outer>");
-        let names = TestNames::new(&mut state.xot);
+        let names = TestNames::new(&mut state.source);
 
         #[derive(Debug, PartialEq)]
         enum AnyValue {
@@ -1044,7 +1082,7 @@ mod tests {
         }
 
         let parser_a = one(|Content { node, .. }| {
-            if let Some(element) = state.xot.element(node) {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_a {
                     return Ok(AnyValue::A(ValueA));
                 }
@@ -1055,7 +1093,7 @@ mod tests {
         });
 
         let parser_b = one(|Content { node, .. }| {
-            if let Some(element) = state.xot.element(node) {
+            if let Some(element) = state.source.element(node) {
                 if element.name() == names.name_b {
                     return Ok(AnyValue::B(ValueB));
                 }

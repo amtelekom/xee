@@ -8,6 +8,7 @@ use ahash::HashMap;
 use clap::{CommandFactory, Parser};
 use rustyline::error::ReadlineError;
 use xee_xpath::{DocumentHandle, Documents, Itemable, Query};
+use xot::Xot;
 
 use crate::{
     error::{render_error, render_parse_error},
@@ -33,7 +34,7 @@ pub(crate) struct Repl {
 }
 
 pub(crate) struct RunContext {
-    documents: Documents,
+    documents: Documents<Xot>,
     document_handle: Option<DocumentHandle>,
     default_namespace_uri: Option<String>,
     namespaces: HashMap<String, String>,
@@ -42,7 +43,7 @@ pub(crate) struct RunContext {
 impl RunContext {
     fn new() -> Self {
         Self {
-            documents: Documents::new(),
+            documents: Documents::new(Xot::new()),
             document_handle: None,
             default_namespace_uri: None,
             namespaces: HashMap::default(),
@@ -126,7 +127,7 @@ impl RunContext {
         };
         println!(
             "{}",
-            sequence.display_representation(self.documents.xot(), &context)
+            sequence.display_representation(self.documents.source(), &context)
         );
         Ok(())
     }

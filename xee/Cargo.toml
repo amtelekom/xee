@@ -15,12 +15,13 @@ homepage = "https://github.com/Paligo/xee"
 xee-xpath = { path = "../xee-xpath", version = "0.1.5" }
 xee-xslt-compiler = { path = "../xee-xslt-compiler", version = "0.1.6" }
 xee-interpreter = { path = "../xee-interpreter", version = "0.2.0" }
-xot = { workspace = true }
+xee-datasource = { path = "../xee-datasource", version = "0.1.0" }
 clap = { workspace = true, features = ["derive", "cargo"] }
 ariadne = "0.5.1"
 anyhow.workspace = true
 regex = { workspace = true }
 rustyline = "15.0.0"
 ahash = { workspace = true }
+xot = {workspace = true}
 
 [dev-dependencies]

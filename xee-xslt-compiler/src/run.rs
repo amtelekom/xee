@@ -1,5 +1,5 @@
+use xee_interpreter::function::XmlDS;
 use xee_name::{Namespaces, FN_NAMESPACE};
-use xot::{Node, Xot};
 
 use xee_interpreter::context::StaticContext;
 use xee_interpreter::error;
@@ -8,11 +8,11 @@ use xee_interpreter::sequence;
 
 use crate::ast_ir::parse;
 
-pub fn evaluate_program(
-    xot: &mut Xot,
-    program: &Program,
-    root: Node,
-) -> error::SpannedResult<sequence::Sequence> {
+pub fn evaluate_program<S: XmlDS>(
+    xot: &mut S,
+    program: &Program<S>,
+    root: S::Node,
+) -> error::SpannedResult<sequence::Sequence<S::Node>> {
     let mut documents = xee_interpreter::xml::Documents::new();
     let handle = documents.add_root(None, root).unwrap();
     let root = documents.get_node_by_handle(handle).unwrap();
@@ -24,7 +24,11 @@ pub fn evaluate_program(
     runnable.many(xot)
 }
 
-pub fn evaluate(xot: &mut Xot, xml: &str, xslt: &str) -> error::SpannedResult<sequence::Sequence> {
+pub fn evaluate<S: XmlDS>(
+    xot: &mut S,
+    xml: &str,
+    xslt: &str,
+) -> error::SpannedResult<sequence::Sequence<S::Node>> {
     let namespaces = Namespaces::new(
         Namespaces::default_namespaces(),
         "".to_string(),

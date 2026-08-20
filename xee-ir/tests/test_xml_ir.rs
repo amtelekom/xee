@@ -94,7 +94,7 @@ fn test_generate_element() {
     let dynamic_context_builder = program.dynamic_context_builder();
     let context = dynamic_context_builder.build();
 
-    let mut xot = xot::Xot::new();
+    let mut xot = ::xot::Xot::new();
     let runnable = program.runnable(&context);
     let sequence = runnable.many(&mut xot).unwrap();
     // we should have the newly created element on top of the stack

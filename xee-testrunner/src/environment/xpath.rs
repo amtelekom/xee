@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use xee_xpath::{Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::catalog::LoadContext;
 
@@ -71,7 +72,7 @@ impl Environment for XPathEnvironmentSpec {
         &self.environment_spec
     }
 
-    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self, Xot>> {
         let environment_spec_query = EnvironmentSpec::load_with_context(queries, context)?;
         let prefix_query = queries.one("@prefix/string()", convert_string)?;
         let namespace_uri_query = queries.one("@uri/string()", convert_string)?;

@@ -5,6 +5,7 @@ use xee_xpath_macros::xpath_fn;
 use crate::atomic::Atomic;
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("math:pi() as xs:double")]
@@ -66,7 +67,9 @@ fn pow(x: Option<f64>, y: Atomic) -> error::Result<Option<f64>> {
             }
             Atomic::Float(OrderedFloat(f)) => Ok(Some(x.powf(f as f64))),
             Atomic::Double(OrderedFloat(d)) => Ok(Some(x.powf(d))),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "math:pow called with a non-numeric $y argument",
+            )),
         }
     } else {
         Ok(None)
@@ -141,21 +144,21 @@ fn atan2(y: f64, x: f64) -> error::Result<Option<f64>> {
     Ok(Some(y.atan2(x)))
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(pi),
-        wrap_xpath_fn!(exp),
-        wrap_xpath_fn!(exp10),
-        wrap_xpath_fn!(log),
-        wrap_xpath_fn!(log10),
-        wrap_xpath_fn!(pow),
-        wrap_xpath_fn!(sqrt),
-        wrap_xpath_fn!(sin),
-        wrap_xpath_fn!(cos),
-        wrap_xpath_fn!(tan),
-        wrap_xpath_fn!(asin),
-        wrap_xpath_fn!(acos),
-        wrap_xpath_fn!(atan),
-        wrap_xpath_fn!(atan2),
+        wrap_xpath_fn!(pi, S),
+        wrap_xpath_fn!(exp, S),
+        wrap_xpath_fn!(exp10, S),
+        wrap_xpath_fn!(log, S),
+        wrap_xpath_fn!(log10, S),
+        wrap_xpath_fn!(pow, S),
+        wrap_xpath_fn!(sqrt, S),
+        wrap_xpath_fn!(sin, S),
+        wrap_xpath_fn!(cos, S),
+        wrap_xpath_fn!(tan, S),
+        wrap_xpath_fn!(asin, S),
+        wrap_xpath_fn!(acos, S),
+        wrap_xpath_fn!(atan, S),
+        wrap_xpath_fn!(atan2, S),
     ]
 }

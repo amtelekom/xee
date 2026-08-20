@@ -1,13 +1,14 @@
 use ibig::IBig;
 use ordered_float::OrderedFloat;
 use rust_decimal::prelude::*;
-use xot::xmlname::NameStrInfo;
+use xee_datasource::xmlname::NameStrInfo;
 
 use xee_schema_type::Xs;
 
 use crate::atomic;
 use crate::context;
 use crate::error;
+use crate::function::XmlDS;
 
 use super::cast_numeric::decimal_to_integer;
 
@@ -86,10 +87,10 @@ impl atomic::Atomic {
         }
     }
 
-    pub(crate) fn cast_to_schema_type(
+    pub(crate) fn cast_to_schema_type<S: XmlDS>(
         self,
         xs: Xs,
-        static_context: &context::StaticContext,
+        static_context: &context::StaticContext<S>,
     ) -> error::Result<atomic::Atomic> {
         // if we try to cast to any atomic type, we're already the correct type
         if xs == Xs::AnyAtomicType {
@@ -156,19 +157,19 @@ impl atomic::Atomic {
         }
     }
 
-    pub(crate) fn cast_to_schema_type_of(
+    pub(crate) fn cast_to_schema_type_of<S: XmlDS>(
         self,
         other: &atomic::Atomic,
-        context: &context::StaticContext,
+        context: &context::StaticContext<S>,
     ) -> error::Result<atomic::Atomic> {
         self.cast_to_schema_type(other.schema_type(), context)
     }
 
     // if a derives from b, cast to b, otherwise vice versa
-    pub(crate) fn cast_to_same_schema_type(
+    pub(crate) fn cast_to_same_schema_type<S: XmlDS>(
         self,
         other: atomic::Atomic,
-        context: &context::StaticContext,
+        context: &context::StaticContext<S>,
     ) -> error::Result<(atomic::Atomic, atomic::Atomic)> {
         if self.derives_from(&other) {
             let a = self.cast_to_schema_type_of(&other, context)?;
@@ -177,13 +178,17 @@ impl atomic::Atomic {
             let b = other.cast_to_schema_type_of(&self, context)?;
             Ok((self, b))
         } else {
-            Err(error::Error::XPTY0004)
+            Err(error::Error::XPTY0004(
+                "cast_to_same_schema_type called with Atomics without shared schema ancestry",
+            ))
         }
     }
 
     pub(crate) fn cast_to_boolean(self) -> error::Result<atomic::Atomic> {
         match self {
-            atomic::Atomic::String(atomic::StringType::AnyURI, _) => Err(error::Error::XPTY0004),
+            atomic::Atomic::String(atomic::StringType::AnyURI, _) => Err(error::Error::XPTY0004(
+                "cast_to_boolean called on an URI-String Atomic",
+            )),
             atomic::Atomic::Untyped(s) | atomic::Atomic::String(_, s) => {
                 Self::parse_atomic::<bool>(&s)
             }
@@ -192,7 +197,9 @@ impl atomic::Atomic {
             atomic::Atomic::Integer(_, i) => Ok(atomic::Atomic::Boolean(!i.is_zero())),
             atomic::Atomic::Double(d) => Ok(atomic::Atomic::Boolean(!(d.is_nan() || d.is_zero()))),
             atomic::Atomic::Boolean(_) => Ok(self.clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "cast_to_boolean called on incompatible Atomic",
+            )),
         }
     }
 
@@ -214,7 +221,9 @@ impl atomic::Atomic {
         F: Fn(&str) -> error::Result<Vec<u8>>,
     {
         match self {
-            atomic::Atomic::String(atomic::StringType::AnyURI, _) => Err(error::Error::XPTY0004),
+            atomic::Atomic::String(atomic::StringType::AnyURI, _) => Err(error::Error::XPTY0004(
+                "cast_to_binary called on URI-String Atomic",
+            )),
             atomic::Atomic::String(_, s) | atomic::Atomic::Untyped(s) => {
                 let s = s.as_ref();
                 let s = whitespace_remove(s);
@@ -222,7 +231,9 @@ impl atomic::Atomic {
                 Ok(atomic::Atomic::Binary(binary_type, data.into()))
             }
             atomic::Atomic::Binary(_, data) => Ok(atomic::Atomic::Binary(binary_type, data)),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "cast_to_binary called on incompatible Atomic",
+            )),
         }
     }
 

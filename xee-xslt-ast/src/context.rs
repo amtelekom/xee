@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use rust_decimal::Decimal;
+use xee_datasource::{Prefixes, XmlDS, XmlNamespaceAccess};
 use xee_xpath_ast::{ast as xpath_ast, VariableNames, XPathParserContext};
 use xee_xpath_ast::{Namespaces, FN_NAMESPACE};
 
@@ -11,8 +12,8 @@ use crate::{ast_core as ast, state::State};
 /// for particular sub-trees.
 
 #[derive(Debug, Clone)]
-pub(crate) struct Context {
-    prefixes: xot::Prefixes,
+pub(crate) struct Context<S: XmlDS> {
+    prefixes: ahash::AHashMap<S::PrefixId, S::NamespaceId>,
     // known variable names
     variable_names: HashSet<xpath_ast::Name>,
 
@@ -27,8 +28,8 @@ pub(crate) struct Context {
     extension_element_prefixes: Vec<ast::Prefix>,
 }
 
-impl Context {
-    pub(crate) fn new(prefixes: xot::Prefixes) -> Self {
+impl<S: XmlDS> Context<S> {
+    pub(crate) fn new(prefixes: ahash::AHashMap<S::PrefixId, S::NamespaceId>) -> Self {
         let mut r = Self::empty();
         r.prefixes = prefixes;
         r
@@ -36,7 +37,7 @@ impl Context {
 
     pub(crate) fn empty() -> Self {
         Self {
-            prefixes: xot::Prefixes::new(),
+            prefixes: ahash::AHashMap::new(),
             variable_names: HashSet::new(),
             default_collation: vec![
                 "http://www.w3.org/2005/xpath-functions/collation/codepoint".to_string()
@@ -51,36 +52,25 @@ impl Context {
         }
     }
 
-    pub(crate) fn with_prefixes(&self, prefixes: &xot::Prefixes) -> Self {
-        let mut expanded_prefixes = self.prefixes.clone();
-        expanded_prefixes.extend(prefixes);
-        Self {
-            prefixes: expanded_prefixes,
-            ..self.clone()
-        }
+    pub(crate) fn with_prefixes(&self, prefixes: &Prefixes<S>) -> Self {
+        let mut expanded = self.clone();
+        expanded.prefixes.extend(prefixes);
+        expanded
     }
 
     pub(crate) fn with_variable_name(&self, name: &xpath_ast::Name) -> Self {
-        let mut variable_names = self.variable_names.clone();
-        variable_names.insert(name.clone());
-        Self {
-            variable_names,
-            ..self.clone()
-        }
+        let mut expanded = self.clone();
+        expanded.variable_names.insert(name.clone());
+        expanded
     }
 
     pub(crate) fn with_static_standard(
         &self,
-        namespaces: xot::Namespaces,
+        namespaces: S::NamespaceAccess<'_>,
         static_standard: ast::StaticStandard,
     ) -> Self {
         let mut expanded_prefixes = self.prefixes.clone();
-        expanded_prefixes.extend(
-            namespaces
-                .iter()
-                .map(|(k, v)| (k, *v))
-                .collect::<xot::Prefixes>(),
-        );
+        expanded_prefixes.extend(namespaces.iter().map(|(k, v)| (k, *v)));
         let xpath_default_namespace =
             if let Some(xpath_default_namespace) = static_standard.xpath_default_namespace {
                 xpath_default_namespace
@@ -94,18 +84,13 @@ impl Context {
         }
     }
 
-    pub(crate) fn with_standard(
+    pub(crate) fn with_standard<'a>(
         &self,
-        namespaces: xot::Namespaces,
+        namespaces: S::NamespaceAccess<'a>,
         standard: ast::Standard,
     ) -> Self {
         let mut expanded_prefixes = self.prefixes.clone();
-        expanded_prefixes.extend(
-            namespaces
-                .iter()
-                .map(|(k, v)| (k, *v))
-                .collect::<xot::Prefixes>(),
-        );
+        expanded_prefixes.extend(namespaces.iter().map(|(k, v)| (k, *v)));
         let default_collation = if let Some(default_collation) = standard.default_collation {
             default_collation
         } else {
@@ -170,11 +155,11 @@ impl Context {
         }
     }
 
-    pub(crate) fn namespaces<'a>(&'a self, state: &'a State) -> Namespaces {
+    pub(crate) fn namespaces<'a>(&'a self, state: &'a State<S>) -> Namespaces {
         let mut namespaces = HashMap::new();
         for (prefix, ns) in &self.prefixes {
-            let prefix = state.xot.prefix_str(*prefix);
-            let uri = state.xot.namespace_str(*ns);
+            let prefix = state.source.prefix_str(*prefix);
+            let uri = state.source.namespace_str(*ns);
             namespaces.insert(prefix.to_string(), uri.to_string());
         }
         Namespaces::new(
@@ -188,7 +173,7 @@ impl Context {
         &self.variable_names
     }
 
-    pub(crate) fn parser_context(&self, state: &State) -> XPathParserContext {
+    pub(crate) fn parser_context(&self, state: &State<S>) -> XPathParserContext {
         let namespaces = self.namespaces(state);
         XPathParserContext::new(namespaces, self.variable_names.clone())
     }

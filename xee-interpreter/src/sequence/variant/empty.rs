@@ -1,4 +1,4 @@
-use xot::Xot;
+use xee_datasource::{XmlDS, XmlNode};
 
 use crate::{atomic, error};
 
@@ -11,7 +11,7 @@ const MAXIMUM_RANGE_SIZE: i64 = 2_i64.pow(25);
 #[derive(Debug, Clone, PartialEq)]
 pub struct Empty {}
 
-impl SequenceCore<'_, std::iter::Empty<Item>> for Empty {
+impl<N: XmlNode> SequenceCore<'_, std::iter::Empty<Item<N>>, N> for Empty {
     #[inline]
     fn is_empty(&self) -> bool {
         true
@@ -23,22 +23,24 @@ impl SequenceCore<'_, std::iter::Empty<Item>> for Empty {
     }
 
     #[inline]
-    fn get(&self, _index: usize) -> Option<Item> {
+    fn get(&self, _index: usize) -> Option<Item<N>> {
         None
     }
 
     #[inline]
-    fn one(self) -> error::Result<Item> {
-        Err(error::Error::XPTY0004)
+    fn one(self) -> error::Result<Item<N>> {
+        Err(error::Error::XPTY0004(
+            "Empty::one called on an empty sequence",
+        ))
     }
 
     #[inline]
-    fn option(self) -> error::Result<Option<Item>> {
+    fn option(self) -> error::Result<Option<Item<N>>> {
         Ok(None)
     }
 
     #[inline]
-    fn iter(&self) -> std::iter::Empty<Item> {
+    fn iter(&self) -> std::iter::Empty<Item<N>> {
         std::iter::empty()
     }
 
@@ -48,7 +50,7 @@ impl SequenceCore<'_, std::iter::Empty<Item>> for Empty {
     }
 
     #[inline]
-    fn string_value(&self, _xot: &xot::Xot) -> error::Result<String> {
+    fn string_value<S: XmlDS<Node = N>>(&self, _source: &S) -> error::Result<String> {
         Ok(String::new())
     }
 }
@@ -56,42 +58,49 @@ impl SequenceCore<'_, std::iter::Empty<Item>> for Empty {
 // We implement specific interfaces here, instead of generically for all
 // T that implement sequenceCore, because we want to provide a few specialized
 // implementations.
-impl<'a, I> SequenceExt<'a, I> for Empty
+impl<'a, I, N: XmlNode + 'a> SequenceExt<'a, I, N> for Empty
 where
-    I: Iterator<Item = Item> + 'a,
-    Empty: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    Empty: SequenceCore<'a, I, N>,
 {
-    fn atomized(
+    fn atomized<S: XmlDS<Node = N>>(
         &'a self,
-        _xot: &'a xot::Xot,
+        _source: &'a S,
     ) -> impl Iterator<Item = error::Result<atomic::Atomic>> + 'a {
         std::iter::empty()
     }
 
     /// Get just one atomized value from the sequence
-    fn atomized_one(&'a self, _xot: &'a Xot) -> error::Result<atomic::Atomic> {
-        Err(error::Error::XPTY0004)
+    fn atomized_one<S: XmlDS<Node = N>>(&'a self, _source: &'a S) -> error::Result<atomic::Atomic> {
+        Err(error::Error::XPTY0004(
+            "Empty::atomized_one called on an empty sequence",
+        ))
     }
 
     /// Get an optional atomized value from the sequence
-    fn atomized_option(&'a self, _xot: &'a Xot) -> error::Result<Option<atomic::Atomic>> {
+    fn atomized_option<S: XmlDS<Node = N>>(
+        &'a self,
+        _source: &'a S,
+    ) -> error::Result<Option<atomic::Atomic>> {
         Ok(None)
     }
 }
 
-impl<'a, I> SequenceCompare<'a, I> for Empty
+impl<'a, I, N: XmlNode> SequenceCompare<'a, I, N> for Empty
 where
-    I: Iterator<Item = Item> + 'a,
-    Empty: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    Empty: SequenceCore<'a, I, N>,
 {
 }
 
-impl<'a, I> SequenceOrder<'a, I> for Empty
+impl<'a, I, N: XmlNode> SequenceOrder<'a, I, N> for Empty
 where
-    I: Iterator<Item = Item>,
-    Empty: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>>,
+    Empty: SequenceCore<'a, I, N>,
 {
-    fn one_node(&self) -> error::Result<xot::Node> {
-        Err(error::Error::XPTY0004)
+    fn one_node(&self) -> error::Result<N> {
+        Err(error::Error::XPTY0004(
+            "Empty::one_node called on an empty sequence",
+        ))
     }
 }

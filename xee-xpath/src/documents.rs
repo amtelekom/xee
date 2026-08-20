@@ -1,9 +1,9 @@
 use iri_string::types::IriStr;
+use xee_interpreter::function::XmlDS;
 use xee_interpreter::{
     context::DocumentsRef,
     xml::{DocumentHandle, DocumentsError},
 };
-use xot::Xot;
 
 /// A collection of XML documents and their nodes that can be used by XPath and
 /// XSLT.
@@ -22,20 +22,20 @@ use xot::Xot;
 /// used to look up the added [`xee_interpreter::xml::Document`] items
 /// by URI or handle.
 #[derive(Debug)]
-pub struct Documents {
-    // The Xot arena holding all nodes of the documents in the collection.
-    pub(crate) xot: Xot,
+pub struct Documents<S: XmlDS> {
+    // The XML Datasource holding all nodes of the documents in the collection.
+    pub(crate) source: S,
     // A reference to the underlaying collection of XML documents
     // so they can be looked up by URI or handle. Each Document stores the
     // URI and root node of the XML data.
-    pub(crate) documents: DocumentsRef,
+    pub(crate) documents: DocumentsRef<S>,
 }
 
-impl Documents {
+impl<S: XmlDS> Documents<S> {
     /// Create a new empty collection of documents.
-    pub fn new() -> Self {
+    pub fn new(source: S) -> Self {
         Self {
-            xot: Xot::new(),
+            source,
             documents: DocumentsRef::new(),
         }
     }
@@ -51,7 +51,7 @@ impl Documents {
     ) -> Result<DocumentHandle, DocumentsError> {
         self.documents
             .borrow_mut()
-            .add_string(&mut self.xot, Some(uri), xml)
+            .add_string(&mut self.source, Some(uri), xml)
     }
 
     /// Load a string as an XML document without designating it with a URI.
@@ -61,32 +61,32 @@ impl Documents {
     pub fn add_string_without_uri(&mut self, xml: &str) -> Result<DocumentHandle, DocumentsError> {
         self.documents
             .borrow_mut()
-            .add_string(&mut self.xot, None, xml)
+            .add_string(&mut self.source, None, xml)
     }
 
     /// Given a handle give back the document node
-    pub fn document_node(&self, handle: DocumentHandle) -> Option<xot::Node> {
+    pub fn document_node(&self, handle: DocumentHandle) -> Option<S::Node> {
         self.documents.borrow().get_node_by_handle(handle)
     }
 
     /// Get a reference to the documents ([`xee_interpreter::xml::Documents`])
-    pub fn documents(&self) -> &DocumentsRef {
+    pub fn documents(&self) -> &DocumentsRef<S> {
         &self.documents
     }
 
     /// Get a reference to the Xot arena
-    pub fn xot(&self) -> &Xot {
-        &self.xot
+    pub fn source(&self) -> &S {
+        &self.source
     }
 
     /// Get a mutable reference to the Xot arena
-    pub fn xot_mut(&mut self) -> &mut Xot {
-        &mut self.xot
+    pub fn source_mut(&mut self) -> &mut S {
+        &mut self.source
     }
 }
 
-impl Default for Documents {
+impl<S: XmlDS + Default> Default for Documents<S> {
     fn default() -> Self {
-        Self::new()
+        Self::new(S::default())
     }
 }

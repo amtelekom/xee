@@ -1,3 +1,4 @@
+use xee_datasource::XmlDS;
 use xee_schema_type::Xs;
 use xee_xpath_type::ast::SequenceType;
 
@@ -23,11 +24,11 @@ impl Name {
 }
 
 #[derive(Debug, Clone)]
-pub struct InlineFunction {
+pub struct InlineFunction<S: XmlDS> {
     pub name: String,
     pub signature: Signature,
     // things referenced by instructions (by index)
-    pub constants: Vec<sequence::Sequence>,
+    pub constants: Vec<sequence::Sequence<S::Node>>,
     pub steps: Vec<xml::Step>,
     pub cast_types: Vec<CastType>,
     pub sequence_types: Vec<SequenceType>,
@@ -37,7 +38,7 @@ pub struct InlineFunction {
     pub spans: Vec<SourceSpan>,
 }
 
-impl InlineFunction {
+impl<S: XmlDS> InlineFunction<S> {
     pub(crate) fn signature(&self) -> &Signature {
         &self.signature
     }

@@ -6,16 +6,16 @@ use std::sync::LazyLock;
 use iri_string::types::IriAbsoluteStr;
 use iri_string::types::IriAbsoluteString;
 use iri_string::types::IriReferenceStr;
+use xee_datasource::xmlname::OwnedName;
 use xee_name::{Namespaces, VariableNames};
 use xee_xpath_ast::ast;
 use xee_xpath_ast::XPathParserContext;
 
 use crate::error;
 use crate::function;
+use crate::function::StaticFunctions;
+use crate::function::XmlDS;
 use crate::string::{Collation, Collations};
-
-static STATIC_FUNCTIONS: LazyLock<function::StaticFunctions> =
-    LazyLock::new(function::StaticFunctions::new);
 
 // use lazy static to initialize the default collation
 static DEFAULT_COLLATION: LazyLock<IriAbsoluteString> = LazyLock::new(|| {
@@ -25,32 +25,31 @@ static DEFAULT_COLLATION: LazyLock<IriAbsoluteString> = LazyLock::new(|| {
 });
 
 #[derive(Debug)]
-pub struct StaticContext {
+pub struct StaticContext<S: XmlDS> {
     parser_context: XPathParserContext,
-    functions: &'static function::StaticFunctions,
+    functions: &'static function::StaticFunctions<S>,
     // TODO: try to make collations static
     collations: RefCell<Collations>,
     static_base_uri: Option<IriAbsoluteString>,
 }
 
-impl Default for StaticContext {
+impl<S: XmlDS> Default for StaticContext<S> {
     fn default() -> Self {
         Self::new(Namespaces::default(), VariableNames::default(), None)
     }
 }
 
-impl From<XPathParserContext> for StaticContext {
+impl<S: XmlDS> From<XPathParserContext> for StaticContext<S> {
     fn from(parser_context: XPathParserContext) -> Self {
         Self {
             parser_context,
-            functions: &STATIC_FUNCTIONS,
+            functions: Self::get_static_functions(),
             collations: RefCell::new(Collations::new()),
             static_base_uri: None,
         }
     }
 }
-
-impl StaticContext {
+impl<S: XmlDS> StaticContext<S> {
     pub(crate) fn new(
         namespaces: Namespaces,
         variable_names: VariableNames,
@@ -58,10 +57,17 @@ impl StaticContext {
     ) -> Self {
         Self {
             parser_context: XPathParserContext::new(namespaces, variable_names),
-            functions: &STATIC_FUNCTIONS,
+            functions: Self::get_static_functions(),
             collations: RefCell::new(Collations::new()),
             static_base_uri,
         }
+    }
+
+    // Helper fn to get generic static variable (i.e., one instance of StaticFunctions per S)
+    fn get_static_functions() -> &'static function::StaticFunctions<S> {
+        let untyped =
+            S::static_functions_ref().get_or_init(|| Box::new(StaticFunctions::<S>::new()));
+        untyped.downcast_ref().unwrap()
     }
 
     pub fn from_namespaces(namespaces: Namespaces) -> Self {
@@ -127,14 +133,14 @@ impl StaticContext {
     pub fn function_by_id(
         &self,
         static_function_id: function::StaticFunctionId,
-    ) -> &function::StaticFunction {
+    ) -> &function::StaticFunction<S> {
         self.functions.get_by_index(static_function_id)
     }
 
     /// Get a static function by name and arity
     pub fn function_id_by_name(
         &self,
-        name: &xot::xmlname::OwnedName,
+        name: &OwnedName,
         arity: u8,
     ) -> Option<function::StaticFunctionId> {
         self.functions.get_by_name(name, arity)
@@ -143,7 +149,7 @@ impl StaticContext {
     /// Get an internal static function by name and arity
     pub fn function_id_by_internal_name(
         &self,
-        name: &xot::xmlname::OwnedName,
+        name: &OwnedName,
         arity: u8,
     ) -> Option<function::StaticFunctionId> {
         self.functions.get_by_internal_name(name, arity)

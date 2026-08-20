@@ -1,7 +1,8 @@
 use ahash::{HashSet, HashSetExt};
 use std::rc::Rc;
-use xot::Xot;
+use xee_datasource::{XmlNode, XmlNodeWrapper};
 
+use crate::function::XmlDS;
 use crate::{context, error, string::Collation, xml};
 
 use super::{
@@ -13,8 +14,8 @@ use super::{
     variant::{Empty, Range, RangeIterator},
 };
 
-impl Sequence {
-    pub(crate) fn new(items: Vec<Item>) -> Self {
+impl<N: XmlNode> Sequence<N> {
+    pub(crate) fn new(items: Vec<Item<N>>) -> Self {
         match items.len() {
             0 => Self::Empty(Empty {}),
             1 => Self::One(items.into_iter().next().unwrap().into()),
@@ -67,7 +68,9 @@ impl Sequence {
                     Self::Range(Range::new(b.start().clone(), a.end().clone())?)
                 } else {
                     // otherwise unfortunately we have to construct the sequence
-                    let mut v = Vec::with_capacity(a.len() + b.len());
+                    let mut v = Vec::with_capacity(
+                        SequenceCore::<_, N>::len(&a) + SequenceCore::<_, N>::len(&b),
+                    );
                     for i in RangeIterator::new(a.start().clone(), a.end().clone()) {
                         v.push(i);
                     }
@@ -92,7 +95,10 @@ impl Sequence {
     }
 
     // https://www.w3.org/TR/xpath-31/#id-path-operator
-    pub(crate) fn deduplicate(self, annotations: xml::DocumentOrderAccess) -> error::Result<Self> {
+    pub(crate) fn deduplicate<S: XmlDS<Node = N>>(
+        self,
+        annotations: xml::DocumentOrderAccess<S>,
+    ) -> error::Result<Self> {
         let mut s = HashSet::new();
         let mut non_node_seen = false;
 
@@ -100,13 +106,17 @@ impl Sequence {
             match item {
                 Item::Node(n) => {
                     if non_node_seen {
-                        return Err(error::Error::XPTY0004);
+                        return Err(error::Error::XPTY0004(
+                            "Sequence::deduplicate called on a mixed sequence of nodes and non-nodes",
+                        ));
                     }
                     s.insert(n);
                 }
                 _ => {
                     if !s.is_empty() {
-                        return Err(error::Error::XPTY0004);
+                        return Err(error::Error::XPTY0004(
+                            "Sequence::deduplicate called on a mixed sequence of nodes and non-nodes",
+                        ));
                     }
                     non_node_seen = true;
                 }
@@ -119,37 +129,37 @@ impl Sequence {
         }
     }
 
-    pub(crate) fn process_set_result(
-        s: HashSet<xot::Node>,
-        annotations: xml::DocumentOrderAccess,
+    pub(crate) fn process_set_result<S: XmlDS<Node = N>>(
+        s: HashSet<S::Node>,
+        annotations: xml::DocumentOrderAccess<S>,
     ) -> Self {
         // sort nodes by document order
-        let mut nodes = s.into_iter().collect::<Vec<_>>();
-        nodes.sort_by_key(|n| annotations.get(*n));
+        let mut nodes = s.into_iter().map(XmlNodeWrapper).collect::<Vec<_>>();
+        nodes.sort_by_key(|n| annotations.get(n.0));
         nodes.into()
     }
 
-    pub fn sorted(
+    pub fn sorted<S: XmlDS<Node = N>>(
         &self,
-        context: &context::DynamicContext,
+        context: &context::DynamicContext<S>,
         collation: Rc<Collation>,
-        xot: &Xot,
+        source: &S,
     ) -> error::Result<Self> {
         self.sorted_by_key(context, collation, |item| {
             // the equivalent of fn:data()
             let seq: Self = item.into();
-            seq.atomized(xot).collect::<error::Result<Sequence>>()
+            seq.atomized(source).collect::<error::Result<Sequence<N>>>()
         })
     }
 
-    pub fn sorted_by_key<F>(
+    pub fn sorted_by_key<F, S: XmlDS<Node = N>>(
         &self,
-        context: &context::DynamicContext,
+        context: &context::DynamicContext<S>,
         collation: Rc<Collation>,
         get: F,
     ) -> error::Result<Self>
     where
-        F: FnMut(Item) -> error::Result<Sequence>,
+        F: FnMut(Item<N>) -> error::Result<Sequence<N>>,
     {
         // see also sort_by_sequence in array.rs. The signatures are
         // sufficiently different we don't want to try to unify them.
@@ -173,7 +183,7 @@ impl Sequence {
         let result = keys_and_items
             .into_iter()
             .map(|(_, item)| item)
-            .collect::<Sequence>();
+            .collect::<Sequence<N>>();
         Ok(result)
     }
 
@@ -194,10 +204,10 @@ impl Sequence {
         Ok(result.into())
     }
 
-    pub(crate) fn union(
+    pub(crate) fn union<S: XmlDS<Node = N>>(
         self,
         other: Self,
-        annotations: xml::DocumentOrderAccess,
+        annotations: xml::DocumentOrderAccess<S>,
     ) -> error::Result<Self> {
         let mut s = HashSet::new();
         for node in self.nodes() {
@@ -210,10 +220,10 @@ impl Sequence {
         Ok(Self::process_set_result(s, annotations))
     }
 
-    pub(crate) fn intersect(
+    pub(crate) fn intersect<S: XmlDS<Node = N>>(
         self,
         other: Self,
-        annotations: xml::DocumentOrderAccess,
+        annotations: xml::DocumentOrderAccess<S>,
     ) -> error::Result<Self> {
         let mut s = HashSet::new();
         let mut r = HashSet::new();
@@ -229,10 +239,10 @@ impl Sequence {
         Ok(Self::process_set_result(r, annotations))
     }
 
-    pub(crate) fn except(
+    pub(crate) fn except<S: XmlDS<Node = N>>(
         self,
         other: Self,
-        annotations: xml::DocumentOrderAccess,
+        annotations: xml::DocumentOrderAccess<S>,
     ) -> error::Result<Self> {
         let mut s = HashSet::new();
         for node in self.nodes() {
@@ -246,29 +256,37 @@ impl Sequence {
 
     /// Normalize this sequence into a document node, according to
     /// <https://www.w3.org/TR/xslt-xquery-serialization-31/#serdm>
-    pub fn normalize(&self, item_separator: &str, xot: &mut Xot) -> error::Result<xot::Node> {
-        normalize(self, item_separator, xot)
+    pub fn normalize<S: XmlDS<Node = N>>(
+        &self,
+        item_separator: &str,
+        source: &mut S,
+    ) -> error::Result<N> {
+        normalize(self, item_separator, source)
     }
 
     /// Serialize this sequence according to serialization parameters
-    pub fn serialize(
+    pub fn serialize<S: XmlDS<Node = N>>(
         &self,
         params: SerializationParameters,
-        xot: &mut Xot,
+        source: &mut S,
     ) -> error::Result<String> {
-        serialize_sequence(self, params, xot)
+        serialize_sequence(self, params, source)
     }
 
     /// Display representation of the sequence
-    pub fn display_representation(&self, xot: &Xot, context: &context::DynamicContext) -> String {
+    pub fn display_representation<S: XmlDS<Node = N>>(
+        &self,
+        source: &S,
+        context: &context::DynamicContext<S>,
+    ) -> String {
         // TODO: various unwraps
         match &self {
             Sequence::Empty(_) => "()".to_string(),
-            Sequence::One(item) => item.item().display_representation(xot, context).unwrap(),
+            Sequence::One(item) => item.item().display_representation(source, context).unwrap(),
             Sequence::Many(items) => {
                 let mut representations = Vec::with_capacity(self.len());
                 for item in items.iter() {
-                    representations.push(item.display_representation(xot, context).unwrap());
+                    representations.push(item.display_representation(source, context).unwrap());
                 }
                 format!("(\n{}\n)", representations.join(",\n"))
             }

@@ -135,7 +135,7 @@ impl Atomic {
     pub(crate) fn to_str(&self) -> error::Result<&str> {
         match self {
             Atomic::String(_, s) => Ok(s),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004("to_str called on non-String Atomic")),
         }
     }
 
@@ -153,7 +153,7 @@ impl Atomic {
     }
 
     /// Check whether this value is the NaN value.
-    ///  
+    ///
     /// Only xs:float and xs:double can be NaN.
     pub fn is_nan(&self) -> bool {
         match self {
@@ -271,7 +271,9 @@ impl Atomic {
         if self.schema_type().derives_from(xs) {
             Ok(())
         } else {
-            Err(error::Error::XPTY0004)
+            Err(error::Error::XPTY0004(
+                "ensure_base_schema_type called on non-derived type",
+            ))
         }
     }
 
@@ -343,7 +345,9 @@ impl Atomic {
         default_offset: chrono::FixedOffset,
     ) -> error::Result<Ordering> {
         if !self.is_comparable() || !other.is_comparable() {
-            return Err(error::Error::XPTY0004);
+            return Err(error::Error::XPTY0004(
+                "fallible_compare called on non-comparable Atomics",
+            ));
         }
         let is_equal = OpEq::atomic_compare(
             self.clone(),
@@ -422,7 +426,9 @@ impl TryFrom<Atomic> for String {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::String(_, s) => Ok(s.to_string()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "String::try_from called with non-String Atomic",
+            )),
         }
     }
 }
@@ -441,7 +447,9 @@ impl TryFrom<Atomic> for bool {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Boolean(b) => Ok(b),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "bool::try_from called with non-bool Atomic",
+            )),
         }
     }
 }
@@ -460,7 +468,9 @@ impl TryFrom<Atomic> for Decimal {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Decimal(d) => Ok(*d.as_ref()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Decimal::try_from called with non-Decimal Atomic",
+            )),
         }
     }
 }
@@ -493,7 +503,9 @@ impl TryFrom<Atomic> for IriReferenceString {
             Atomic::String(_, s) => {
                 Ok(s.as_ref().try_into().map_err(|_| error::Error::FORG0002)?)
             }
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "IriReferenceString::try_from called with non-String Atomic",
+            )),
         }
     }
 }
@@ -518,7 +530,9 @@ impl TryFrom<Atomic> for Rc<IBig> {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(_, i) => Ok(i),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Rc<IBig>::try_from called with non-Integer Atomic",
+            )),
         }
     }
 }
@@ -529,7 +543,9 @@ impl TryFrom<Atomic> for IBig {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(_, i) => Ok(i.as_ref().clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "IBig::try_from called with non-Integer Atomic",
+            )),
         }
     }
 }
@@ -547,7 +563,9 @@ impl TryFrom<Atomic> for i64 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::Long, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "i64::try_from called with non-Long-Integer Atomic",
+            )),
         }
     }
 }
@@ -565,7 +583,9 @@ impl TryFrom<Atomic> for i32 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::Int, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "i32::try_from called with non-Int-Integer Atomic",
+            )),
         }
     }
 }
@@ -583,7 +603,9 @@ impl TryFrom<Atomic> for i16 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::Short, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "i16::try_from called with non-Short-Integer Atomic",
+            )),
         }
     }
 }
@@ -601,7 +623,9 @@ impl TryFrom<Atomic> for i8 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::Byte, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "i8::try_from called with non-Byte-Integer Atomic",
+            )),
         }
     }
 }
@@ -619,7 +643,9 @@ impl TryFrom<Atomic> for u64 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::UnsignedLong, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "u64::try_from called with non-ULong-Integer Atomic",
+            )),
         }
     }
 }
@@ -637,7 +663,9 @@ impl TryFrom<Atomic> for u32 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::UnsignedInt, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "u32::try_from called with non-UInt-Integer Atomic",
+            )),
         }
     }
 }
@@ -655,7 +683,9 @@ impl TryFrom<Atomic> for u16 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::UnsignedShort, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "u16::try_from called with non-UShort-Integer Atomic",
+            )),
         }
     }
 }
@@ -673,7 +703,9 @@ impl TryFrom<Atomic> for u8 {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::Integer(IntegerType::UnsignedByte, i) => Ok(i.as_ref().clone().try_into()?),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "u8::try_from called with non-UByte-Integer Atomic",
+            )),
         }
     }
 }
@@ -703,7 +735,9 @@ impl TryFrom<Atomic> for f32 {
                 let f: f32 = a.cast_to_float()?.try_into()?;
                 Ok(f)
             }
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "f32::try_from called with non-Float-compatible Atomic",
+            )),
         }
     }
 }
@@ -732,7 +766,9 @@ impl TryFrom<Atomic> for f64 {
                 let f: f64 = a.cast_to_double()?.try_into()?;
                 Ok(f)
             }
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "f64::try_from called with non-Float-compatible Atomic",
+            )),
         }
     }
 }
@@ -749,7 +785,9 @@ impl TryFrom<Atomic> for Name {
     fn try_from(a: Atomic) -> Result<Self, Self::Error> {
         match a {
             Atomic::QName(n) => Ok(n.as_ref().clone()),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "Name::try_from called with a non-QName Atomic",
+            )),
         }
     }
 }

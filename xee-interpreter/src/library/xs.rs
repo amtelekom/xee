@@ -4,6 +4,7 @@ use crate::atomic;
 use crate::context::DynamicContext;
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("xs:untypedAtomic($arg as xs:anyAtomicType?) as xs:untypedAtomic?")]
@@ -122,8 +123,8 @@ fn xs_any_uri(arg: Option<atomic::Atomic>) -> error::Result<Option<atomic::Atomi
 }
 
 #[xpath_fn("xs:QName($arg as xs:anyAtomicType?) as xs:QName?")]
-fn xs_qname(
-    context: &DynamicContext,
+fn xs_qname<S: XmlDS>(
+    context: &DynamicContext<S>,
     arg: Option<atomic::Atomic>,
 ) -> error::Result<Option<atomic::Atomic>> {
     arg.map(|arg| arg.cast_to_qname(context.static_context()))
@@ -241,54 +242,54 @@ fn xs_positive_integer(arg: Option<atomic::Atomic>) -> error::Result<Option<atom
     arg.map(|arg| arg.cast_to_positive_integer()).transpose()
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(xs_untyped_atomic),
-        wrap_xpath_fn!(xs_numeric),
-        wrap_xpath_fn!(xs_string),
-        wrap_xpath_fn!(xs_float),
-        wrap_xpath_fn!(xs_double),
-        wrap_xpath_fn!(xs_decimal),
-        wrap_xpath_fn!(xs_integer),
-        wrap_xpath_fn!(xs_duration),
-        wrap_xpath_fn!(xs_year_month_duration),
-        wrap_xpath_fn!(xs_day_time_duration),
-        wrap_xpath_fn!(xs_date_time),
-        wrap_xpath_fn!(xs_date_time_stamp),
-        wrap_xpath_fn!(xs_time),
-        wrap_xpath_fn!(xs_date),
-        wrap_xpath_fn!(xs_g_year_month),
-        wrap_xpath_fn!(xs_g_year),
-        wrap_xpath_fn!(xs_g_month_day),
-        wrap_xpath_fn!(xs_g_day),
-        wrap_xpath_fn!(xs_g_month),
-        wrap_xpath_fn!(xs_boolean),
-        wrap_xpath_fn!(xs_base64_binary),
-        wrap_xpath_fn!(xs_hex_binary),
-        wrap_xpath_fn!(xs_any_uri),
-        wrap_xpath_fn!(xs_qname),
+        wrap_xpath_fn!(xs_untyped_atomic, S),
+        wrap_xpath_fn!(xs_numeric, S),
+        wrap_xpath_fn!(xs_string, S),
+        wrap_xpath_fn!(xs_float, S),
+        wrap_xpath_fn!(xs_double, S),
+        wrap_xpath_fn!(xs_decimal, S),
+        wrap_xpath_fn!(xs_integer, S),
+        wrap_xpath_fn!(xs_duration, S),
+        wrap_xpath_fn!(xs_year_month_duration, S),
+        wrap_xpath_fn!(xs_day_time_duration, S),
+        wrap_xpath_fn!(xs_date_time, S),
+        wrap_xpath_fn!(xs_date_time_stamp, S),
+        wrap_xpath_fn!(xs_time, S),
+        wrap_xpath_fn!(xs_date, S),
+        wrap_xpath_fn!(xs_g_year_month, S),
+        wrap_xpath_fn!(xs_g_year, S),
+        wrap_xpath_fn!(xs_g_month_day, S),
+        wrap_xpath_fn!(xs_g_day, S),
+        wrap_xpath_fn!(xs_g_month, S),
+        wrap_xpath_fn!(xs_boolean, S),
+        wrap_xpath_fn!(xs_base64_binary, S),
+        wrap_xpath_fn!(xs_hex_binary, S),
+        wrap_xpath_fn!(xs_any_uri, S),
+        wrap_xpath_fn!(xs_qname, S),
         // string subtypes
-        wrap_xpath_fn!(xs_normalized_string),
-        wrap_xpath_fn!(xs_token),
-        wrap_xpath_fn!(xs_language),
-        wrap_xpath_fn!(xs_nmtoken),
-        wrap_xpath_fn!(xs_name),
-        wrap_xpath_fn!(xs_ncname),
-        wrap_xpath_fn!(xs_id),
-        wrap_xpath_fn!(xs_idref),
-        wrap_xpath_fn!(xs_entity),
+        wrap_xpath_fn!(xs_normalized_string, S),
+        wrap_xpath_fn!(xs_token, S),
+        wrap_xpath_fn!(xs_language, S),
+        wrap_xpath_fn!(xs_nmtoken, S),
+        wrap_xpath_fn!(xs_name, S),
+        wrap_xpath_fn!(xs_ncname, S),
+        wrap_xpath_fn!(xs_id, S),
+        wrap_xpath_fn!(xs_idref, S),
+        wrap_xpath_fn!(xs_entity, S),
         // integer subtypes
-        wrap_xpath_fn!(xs_long),
-        wrap_xpath_fn!(xs_int),
-        wrap_xpath_fn!(xs_short),
-        wrap_xpath_fn!(xs_byte),
-        wrap_xpath_fn!(xs_unsigned_long),
-        wrap_xpath_fn!(xs_unsigned_int),
-        wrap_xpath_fn!(xs_unsigned_short),
-        wrap_xpath_fn!(xs_unsigned_byte),
-        wrap_xpath_fn!(xs_non_positive_integer),
-        wrap_xpath_fn!(xs_negative_integer),
-        wrap_xpath_fn!(xs_non_negative_integer),
-        wrap_xpath_fn!(xs_positive_integer),
+        wrap_xpath_fn!(xs_long, S),
+        wrap_xpath_fn!(xs_int, S),
+        wrap_xpath_fn!(xs_short, S),
+        wrap_xpath_fn!(xs_byte, S),
+        wrap_xpath_fn!(xs_unsigned_long, S),
+        wrap_xpath_fn!(xs_unsigned_int, S),
+        wrap_xpath_fn!(xs_unsigned_short, S),
+        wrap_xpath_fn!(xs_unsigned_byte, S),
+        wrap_xpath_fn!(xs_non_positive_integer, S),
+        wrap_xpath_fn!(xs_negative_integer, S),
+        wrap_xpath_fn!(xs_non_negative_integer, S),
+        wrap_xpath_fn!(xs_positive_integer, S),
     ]
 }

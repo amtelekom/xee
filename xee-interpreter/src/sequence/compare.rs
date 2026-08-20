@@ -1,21 +1,22 @@
 use std::cmp::Ordering;
 
-use xot::Xot;
+use xee_datasource::XmlNode;
 
+use crate::function::XmlDS;
 use crate::{error, function, string::Collation};
 
 use super::{core::Sequence, item::Item};
 
-impl Sequence {
+impl<N: XmlNode> Sequence<N> {
     /// Compare two sequences using XPath deep equal rules.
     ///
     /// <https://www.w3.org/TR/xpath-functions-31/#func-deep-equal>
-    pub fn deep_equal(
+    pub fn deep_equal<S: XmlDS<Node = N>>(
         &self,
         other: &Self,
         collation: &Collation,
         default_offset: chrono::FixedOffset,
-        xot: &Xot,
+        source: &S,
     ) -> error::Result<bool> {
         // https://www.w3.org/TR/xpath-functions-31/#func-deep-equal
         if self.is_empty() && other.is_empty() {
@@ -32,18 +33,18 @@ impl Sequence {
                     }
                 }
                 (Item::Node(a), Item::Node(b)) => {
-                    if !xot.deep_equal_xpath(a, b, |a, b| collation.compare(a, b).is_eq()) {
+                    if !source.deep_equal_xpath(a, b, |a, b| collation.compare(a, b).is_eq()) {
                         return Ok(false);
                     }
                 }
                 (Item::Function(a), Item::Function(b)) => match (a, b) {
                     (function::Function::Array(a), function::Function::Array(b)) => {
-                        if !a.deep_equal(b.clone(), collation, default_offset, xot)? {
+                        if !a.deep_equal(b.clone(), collation, default_offset, source)? {
                             return Ok(false);
                         }
                     }
                     (function::Function::Map(a), function::Function::Map(b)) => {
-                        if !a.deep_equal(&b, collation, default_offset, xot)? {
+                        if !a.deep_equal(&b, collation, default_offset, source)? {
                             return Ok(false);
                         }
                     }
@@ -61,7 +62,7 @@ impl Sequence {
 
     pub(crate) fn fallible_compare(
         &self,
-        other: &Sequence,
+        other: &Sequence<N>,
         collation: &Collation,
         implicit_offset: chrono::FixedOffset,
     ) -> error::Result<Ordering> {
@@ -95,7 +96,7 @@ impl Sequence {
     /// or whether the comparison failed.
     pub(crate) fn compare(
         &self,
-        other: &Sequence,
+        other: &Sequence<N>,
         collation: &Collation,
         implicit_offset: chrono::FixedOffset,
     ) -> Ordering {

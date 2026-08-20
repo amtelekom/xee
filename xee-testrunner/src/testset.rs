@@ -9,6 +9,7 @@ use anyhow::Result;
 use iri_string::types::IriAbsoluteString;
 use xee_xpath::{context, Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::{
     catalog::{Catalog, LoadContext},
@@ -95,7 +96,7 @@ impl<L: Language> ContextLoadable<LoadContext> for TestSet<L> {
     fn load_with_context(
         queries: &Queries,
         context: &LoadContext,
-    ) -> Result<impl Query<TestSet<L>>> {
+    ) -> Result<impl Query<TestSet<L>, Xot>> {
         let name_query = queries.one("@name/string()", convert_string)?;
         let descriptions_query = queries.many("description/string()", convert_string)?;
 

@@ -6,6 +6,7 @@ use num_traits::Float;
 use rand::prelude::*;
 use rand_xoshiro::SplitMix64;
 
+use xee_datasource::XmlNode;
 use xee_name::{Name, FN_NAMESPACE};
 use xee_xpath_macros::xpath_fn;
 
@@ -16,6 +17,7 @@ use crate::context;
 use crate::error;
 use crate::function;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::sequence;
 use crate::wrap_xpath_fn;
@@ -28,7 +30,9 @@ fn abs(arg: Option<Atomic>) -> error::Result<Option<Atomic>> {
             Atomic::Decimal(d) => Ok(Some(d.abs().into())),
             Atomic::Float(f) => Ok(Some(f.abs().into())),
             Atomic::Double(d) => Ok(Some(d.abs().into())),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "fn:abs called with a non-numeric argument",
+            )),
         }
     } else {
         Ok(None)
@@ -43,7 +47,9 @@ fn ceiling(arg: Option<Atomic>) -> error::Result<Option<Atomic>> {
             Atomic::Decimal(d) => Ok(Some(d.ceil().into())),
             Atomic::Float(f) => Ok(Some(f.ceil().into())),
             Atomic::Double(d) => Ok(Some(d.ceil().into())),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "fn:ceiling called with a non-numeric argument",
+            )),
         }
     } else {
         Ok(None)
@@ -58,7 +64,9 @@ fn floor(arg: Option<Atomic>) -> error::Result<Option<Atomic>> {
             Atomic::Decimal(d) => Ok(Some(d.floor().into())),
             Atomic::Float(f) => Ok(Some(f.floor().into())),
             Atomic::Double(d) => Ok(Some(d.floor().into())),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "fn:floor called with a non-numeric argument",
+            )),
         }
     } else {
         Ok(None)
@@ -116,15 +124,17 @@ fn number(arg: Option<Atomic>) -> error::Result<Atomic> {
 }
 
 #[xpath_fn("fn:random-number-generator() as map(xs:string, item())")]
-fn random_number_generator0(context: &context::DynamicContext) -> error::Result<function::Map> {
+fn random_number_generator0<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+) -> error::Result<function::Map<S::Node>> {
     random_number_generator1(context, None)
 }
 
 #[xpath_fn("fn:random-number-generator($seed as xs:anyAtomicType?) as map(xs:string, item())")]
-fn random_number_generator1(
-    context: &context::DynamicContext,
+fn random_number_generator1<S: XmlDS>(
+    context: &context::DynamicContext<S>,
     seed: Option<Atomic>,
-) -> error::Result<function::Map> {
+) -> error::Result<function::Map<S::Node>> {
     // use a hash function with a fixed seed
     let random_state = RandomState::with_seeds(0, 0, 0, 0);
     let seed = if let Some(seed) = seed {
@@ -135,7 +145,10 @@ fn random_number_generator1(
     rng_object(context, seed)
 }
 
-fn rng_object(context: &context::DynamicContext, seed: u64) -> error::Result<function::Map> {
+fn rng_object<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    seed: u64,
+) -> error::Result<function::Map<S::Node>> {
     // XPath 3.1 states that all xs:double values in [0.0, 1.0) SHOULD be
     // equally likely, but a mathematically uniform distribution is clearly
     // the intent.
@@ -170,7 +183,10 @@ fn rng_object(context: &context::DynamicContext, seed: u64) -> error::Result<fun
     "fn:_rng-next($seed as xs:unsignedLong) as map(xs:string, item())",
     anonymous_closure
 )]
-fn rng_next(context: &context::DynamicContext, seed: u64) -> error::Result<function::Map> {
+fn rng_next<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    seed: u64,
+) -> error::Result<function::Map<S::Node>> {
     // this code has the same effect as calling next_u64() on a SplitMix64
     // generator then extracting its state afterward. See the original
     // implementation at:
@@ -183,7 +199,7 @@ fn rng_next(context: &context::DynamicContext, seed: u64) -> error::Result<funct
     "fn:_rng-permute($arg as item()*, $seed as xs:unsignedLong) as item()*",
     anonymous_closure
 )]
-fn rng_permute(arg: &sequence::Sequence, seed: u64) -> sequence::Sequence {
+fn rng_permute<N: XmlNode>(arg: &sequence::Sequence<N>, seed: u64) -> sequence::Sequence<N> {
     // don't use the seed directly, since rejection sampling can cause
     // consecutive seeds in a next() sequence to produce the same shuffle.
     // Adding a level of indirection breaks up this correlation.
@@ -194,19 +210,19 @@ fn rng_permute(arg: &sequence::Sequence, seed: u64) -> sequence::Sequence {
     items.into()
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(abs),
-        wrap_xpath_fn!(ceiling),
-        wrap_xpath_fn!(floor),
-        wrap_xpath_fn!(round1),
-        wrap_xpath_fn!(round2),
-        wrap_xpath_fn!(round_half_to_even1),
-        wrap_xpath_fn!(round_half_to_even2),
-        wrap_xpath_fn!(number),
-        wrap_xpath_fn!(random_number_generator0),
-        wrap_xpath_fn!(random_number_generator1),
-        wrap_xpath_fn!(rng_next),
-        wrap_xpath_fn!(rng_permute),
+        wrap_xpath_fn!(abs, S),
+        wrap_xpath_fn!(ceiling, S),
+        wrap_xpath_fn!(floor, S),
+        wrap_xpath_fn!(round1, S),
+        wrap_xpath_fn!(round2, S),
+        wrap_xpath_fn!(round_half_to_even1, S),
+        wrap_xpath_fn!(round_half_to_even2, S),
+        wrap_xpath_fn!(number, S),
+        wrap_xpath_fn!(random_number_generator0, S),
+        wrap_xpath_fn!(random_number_generator1, S),
+        wrap_xpath_fn!(rng_next, S),
+        wrap_xpath_fn!(rng_permute, S),
     ]
 }

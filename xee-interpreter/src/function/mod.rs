@@ -16,9 +16,14 @@ pub use inline_function::{CastType, InlineFunction, Name};
 pub use map::Map;
 pub use signature::Signature;
 
-// we allow StaticFunctionType as it's used in the xpath_fn macro
 pub use static_function::FunctionRule;
-#[allow(unused_imports)]
-pub(crate) use static_function::StaticFunctionType;
-pub(crate) use static_function::{FunctionKind, StaticFunctionDescription};
-pub(crate) use static_function::{StaticFunction, StaticFunctions};
+pub use static_function::SourceSpecificFunctions;
+pub use static_function::StaticFunctionType;
+pub use static_function::{FunctionKind, StaticFunctionDescription};
+pub use static_function::{StaticFunction, StaticFunctions};
+
+/// inside of xee-interpreter, we nearly always want to refer to XmlDS + SourceSpecificFunctions,
+/// which equals just requiring SourceSpecificFunctions (because it depends on XmlDS),
+/// but semantically we're much more interested in the XmlDS part,
+/// so this shorthand helps keep things tidy.
+pub use static_function::SourceSpecificFunctions as XmlDS;

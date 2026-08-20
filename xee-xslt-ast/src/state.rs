@@ -1,31 +1,31 @@
-use xot::{NameId, Node, SpanInfo, SpanInfoKey, Xot};
+use xee_datasource::{SpanInfo, SpanInfoKey, ValueRef, XmlDS};
 
 use crate::{ast_core::Span, error::AttributeError, name::XmlName, names::Names};
 
 /// Parser state affects the parsing output but does not change during parsing.
-pub(crate) struct State {
-    pub(crate) xot: Xot,
-    pub(crate) span_info: SpanInfo,
-    pub(crate) names: Names,
+pub(crate) struct State<S: XmlDS> {
+    pub(crate) source: S,
+    pub(crate) span_info: SpanInfo<S>,
+    pub(crate) names: Names<S>,
 }
 
-impl State {
-    pub(crate) fn new(xot: Xot, span_info: SpanInfo, names: Names) -> Self {
+impl<S: XmlDS> State<S> {
+    pub(crate) fn new(source: S, span_info: SpanInfo<S>, names: Names<S>) -> Self {
         Self {
-            xot,
+            source,
             span_info,
             names,
         }
     }
 
-    pub(crate) fn next(&self, node: Node) -> Option<Node> {
-        self.xot.next_sibling(node)
+    pub(crate) fn next(&self, node: S::Node) -> Option<S::Node> {
+        self.source.next_sibling(node)
     }
 
-    pub(crate) fn span(&self, node: Node) -> Option<Span> {
-        use xot::Value::*;
+    pub(crate) fn span(&self, node: S::Node) -> Option<Span> {
+        use ValueRef::*;
 
-        match self.xot.value(node) {
+        match self.source.value(node) {
             Element(_element) => self.span_info.get(SpanInfoKey::ElementStart(node)),
             Text(_text) => self.span_info.get(SpanInfoKey::Text(node)),
             Comment(_comment) => self.span_info.get(SpanInfoKey::Comment(node)),
@@ -40,8 +40,8 @@ impl State {
 
     pub(crate) fn attribute_name_span(
         &self,
-        node: Node,
-        name: NameId,
+        node: S::Node,
+        name: S::NameId,
     ) -> Result<Span, AttributeError> {
         let span = self
             .span_info
@@ -52,11 +52,11 @@ impl State {
 
     pub(crate) fn attribute_unexpected(
         &self,
-        node: Node,
-        name: NameId,
+        node: S::Node,
+        name: S::NameId,
         _message: &str,
     ) -> AttributeError {
-        let (local, namespace) = self.xot.name_ns_str(name);
+        let (local, namespace) = self.source.name_ns_str(name);
         let span = self.attribute_name_span(node, name);
         match span {
             Ok(span) => AttributeError::Unexpected {

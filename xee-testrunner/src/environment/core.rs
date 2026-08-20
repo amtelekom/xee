@@ -6,10 +6,11 @@ use std::{
 use ahash::{HashMap, HashMapExt};
 use anyhow::Result;
 use iri_string::types::IriAbsoluteStr;
-use xot::xmlname::OwnedName as Name;
+use xee_datasource::{xmlname::OwnedName as Name, XmlNodeWrapper};
 
 use xee_xpath::{context, Documents, Item, Queries, Query, Sequence};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::catalog::LoadContext;
 
@@ -29,7 +30,7 @@ pub(crate) trait Environment: Sized + std::fmt::Debug {
     fn environment_spec(&self) -> &EnvironmentSpec;
 
     // a query to load it from XML
-    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>>;
+    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self, Xot>>;
 }
 
 // In a test case we can include an environment directly, or refer to an environment
@@ -104,7 +105,7 @@ impl EnvironmentSpec {
     }
     pub(crate) fn load_sources(
         &self,
-        documents: &mut Documents,
+        documents: &mut Documents<Xot>,
         base_uri: Option<&IriAbsoluteStr>,
     ) -> Result<()> {
         // load all the sources. since loading a node has a cache,
@@ -117,19 +118,19 @@ impl EnvironmentSpec {
 
     pub(crate) fn load_collections(
         &self,
-        documents: &mut Documents,
+        documents: &mut Documents<Xot>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> Result<HashMap<String, Sequence>> {
+    ) -> Result<HashMap<String, Sequence<::xot::Node>>> {
         let mut collections = HashMap::new();
         for collection in &self.collections {
-            let mut items: Vec<Item> = Vec::new();
+            let mut items: Vec<Item<::xot::Node>> = Vec::new();
             // right now we only load <source> but we should in the future
             // potential also load <query>. Right now the test suite doesn't
             // exercise this.
             // https://github.com/w3c/qt3tests/issues/66
             for source in &collection.sources {
                 let node = source.node(&self.base_dir, documents, base_uri)?;
-                items.push(node.into());
+                items.push(XmlNodeWrapper(node).into());
             }
             collections.insert(collection.uri.clone(), items.into());
         }
@@ -138,13 +139,13 @@ impl EnvironmentSpec {
 
     pub(crate) fn context_item(
         &self,
-        documents: &mut Documents,
+        documents: &mut Documents<Xot>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> Result<Option<Item>> {
+    ) -> Result<Option<Item<::xot::Node>>> {
         for source in &self.sources {
             if let SourceRole::Context | SourceRole::ContextAndDoc(_) = source.role {
                 let node = source.node(&self.base_dir, documents, base_uri)?;
-                return Ok(Some(Item::from(node)));
+                return Ok(Some(Item::from(XmlNodeWrapper(node))));
             }
         }
         Ok(None)
@@ -152,18 +153,18 @@ impl EnvironmentSpec {
 
     pub(crate) fn variables(
         &self,
-        documents: &mut Documents,
+        documents: &mut Documents<Xot>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> Result<context::Variables> {
-        let mut variables = context::Variables::new();
+    ) -> Result<context::Variables<Xot>> {
+        let mut variables = context::Variables::<Xot>::new();
         for source in &self.sources {
             if let SourceRole::Var(name) = &source.role {
                 let name = &name[1..]; // without $
                 let node = source.node(&self.base_dir, documents, base_uri)?;
-                variables.insert(Name::name(name), Item::from(node).into());
+                variables.insert(Name::name(name), Item::from(XmlNodeWrapper(node)).into());
             }
         }
-        let mut documents = Documents::new();
+        let mut documents = Documents::<Xot>::new(Xot::new());
         for param in &self.params {
             let select = (param.select.as_ref()).expect("param: missing select not supported");
             let queries = Queries::default();
@@ -192,7 +193,10 @@ impl ContextLoadable<LoadContext> for EnvironmentSpec {
         builder
     }
 
-    fn load_with_context(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load_with_context(
+        queries: &Queries,
+        context: &LoadContext,
+    ) -> Result<impl Query<Self, Xot>> {
         let sources_query = Sources::load_with_context(queries, context)?;
 
         let name_query = queries.one("@name/string()", convert_string)?;

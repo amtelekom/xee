@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use xee_xpath::{context, Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::{catalog::LoadContext, hashmap::FxIndexMap};
 
@@ -37,7 +38,7 @@ impl<E: Environment> ContextLoadable<LoadContext> for SharedEnvironments<E> {
     fn load_with_context(
         queries: &Queries,
         context: &LoadContext,
-    ) -> Result<impl Query<SharedEnvironments<E>>> {
+    ) -> Result<impl Query<SharedEnvironments<E>, Xot>> {
         let name_query = queries.one("@name/string()", convert_string)?;
         let environment_spec_query = E::load(queries, context)?;
         let environments_query = queries.many("environment", move |session, item| {

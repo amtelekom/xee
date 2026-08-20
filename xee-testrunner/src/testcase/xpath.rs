@@ -6,6 +6,7 @@ use xee_xpath::{
     Queries, Query,
 };
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::{
     catalog::{Catalog, LoadContext},
@@ -181,7 +182,7 @@ impl Runnable<XPathLanguage> for XPathTestCase {
         )
     }
 
-    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self, Xot>> {
         XPathTestCase::load_with_context(queries, context)
     }
 }
@@ -193,7 +194,10 @@ impl ContextLoadable<LoadContext> for XPathTestCase {
         builder
     }
 
-    fn load_with_context(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load_with_context(
+        queries: &Queries,
+        context: &LoadContext,
+    ) -> Result<impl Query<Self, Xot>> {
         let test_query = queries.one("test/string()", convert_string)?;
         let test_case_query = TestCase::load_with_context(queries, context)?;
         let test_case_query = test_case_query.map(move |test_case, documents, context| {

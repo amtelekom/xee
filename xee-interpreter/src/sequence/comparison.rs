@@ -2,13 +2,14 @@ use crate::atomic;
 use crate::atomic::AtomicCompare;
 use crate::context;
 use crate::error;
+use crate::function::XmlDS;
 
 // https://www.w3.org/TR/xpath-31/#id-general-comparisons
 // step 1, atomization, has already taken place
-pub(crate) fn general_comparison<O>(
+pub(crate) fn general_comparison<O, S: XmlDS>(
     a_atoms: impl Iterator<Item = error::Result<atomic::Atomic>>,
     b_atoms: impl Iterator<Item = error::Result<atomic::Atomic>>,
-    context: &context::DynamicContext,
+    context: &context::DynamicContext<S>,
     _op: O,
 ) -> error::Result<bool>
 where
@@ -36,10 +37,10 @@ where
 }
 
 // step 2: cast
-fn cast(
+fn cast<S: XmlDS>(
     a: atomic::Atomic,
     b: atomic::Atomic,
-    context: &context::StaticContext,
+    context: &context::StaticContext<S>,
 ) -> error::Result<(atomic::Atomic, atomic::Atomic)> {
     Ok(match (&a, &b) {
         // step 2a: if both are untyped atomic, cast them both to string

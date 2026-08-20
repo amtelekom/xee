@@ -18,4 +18,5 @@ pub mod stack;
 pub mod string;
 pub mod xml;
 
+pub use ibig::IBig;
 pub use xee_name::{Name, Namespaces, VariableNames};

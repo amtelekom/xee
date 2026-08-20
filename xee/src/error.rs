@@ -20,7 +20,7 @@ pub(crate) fn render_error(src: &str, e: Error) {
     println!("{}", e.error.note());
 }
 
-pub(crate) fn render_parse_error(src: &str, e: xot::ParseError) {
+pub(crate) fn render_parse_error(src: &str, e: xee_datasource::ParseError) {
     let red = ariadne::Color::Red;
     let mut report = ariadne::Report::build(ariadne::ReportKind::Error, ("source", (0..0)));
 

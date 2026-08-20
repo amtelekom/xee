@@ -1,9 +1,11 @@
 use ahash::HashMap;
 use rust_decimal::Decimal;
-use xot::{xmlname::OwnedName, Xot};
+use xee_datasource::xmlname::OwnedName;
+use xee_datasource::XmlNodeWrapper;
 
 use xee_schema_type::Xs;
 
+use crate::function::XmlDS;
 use crate::{
     atomic, context, error,
     function::{self, Map},
@@ -68,12 +70,12 @@ impl SerializationParameters {
         }
     }
 
-    pub(crate) fn from_map(
-        map: Map,
-        static_context: &context::StaticContext,
-        xot: &Xot,
+    pub(crate) fn from_map<S: XmlDS>(
+        map: Map<S::Node>,
+        static_context: &context::StaticContext<S>,
+        source: &S,
     ) -> error::Result<Self> {
-        let c = OptionParameterConverter::new(&map, static_context, xot);
+        let c = OptionParameterConverter::new(&map, static_context, source);
         let allow_duplicate_names =
             c.option_with_default("allow-duplicate-names", Xs::Boolean, false)?;
 
@@ -190,16 +192,16 @@ impl Default for SerializationParameters {
     }
 }
 
-pub(crate) fn serialize_sequence(
-    arg: &Sequence,
+pub(crate) fn serialize_sequence<S: XmlDS>(
+    arg: &Sequence<S::Node>,
     parameters: SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> error::Result<String> {
     if let Some(local_name) = parameters.method.local_name() {
         match local_name {
-            "xml" => serialize_xml(arg, parameters, xot),
-            "html" => serialize_html(arg, parameters, xot),
-            "json" => serialize_json(arg, parameters, xot),
+            //"xml" => serialize_xml(arg, parameters, source),
+            //"html" => serialize_html(arg, parameters, source),
+            "json" => serialize_json(arg, parameters, source),
             _ => Err(error::Error::SEPM0016),
         }
     } else {
@@ -207,90 +209,94 @@ pub(crate) fn serialize_sequence(
     }
 }
 
-fn serialize_xml(
-    arg: &Sequence,
-    parameters: SerializationParameters,
-    xot: &mut Xot,
-) -> Result<String, error::Error> {
-    let node = arg.normalize(&parameters.item_separator, xot)?;
-    let indentation = xot_indentation(&parameters, xot);
-    let cdata_section_elements = xot_names(&parameters.cdata_section_elements, xot);
-    let declaration = if !parameters.omit_xml_declaration {
-        Some(xot::output::xml::Declaration {
-            encoding: Some(parameters.encoding.to_string()),
-            standalone: parameters.standalone,
-        })
-    } else {
-        None
-    };
-    let doctype = match (parameters.doctype_public, parameters.doctype_system) {
-        (Some(public), Some(system)) => Some(xot::output::xml::DocType::Public { public, system }),
-        (None, Some(system)) => Some(xot::output::xml::DocType::System { system }),
-        // TODO: this should really not happen?
-        (Some(public), None) => Some(xot::output::xml::DocType::Public {
-            public,
-            system: "".to_string(),
-        }),
-        (None, None) => None,
-    };
-    let output_parameters = xot::output::xml::Parameters {
-        indentation,
-        cdata_section_elements,
-        declaration,
-        doctype,
-        ..Default::default()
-    };
+// ToDo: Add Interfaces for this
 
-    Ok(xot.serialize_xml_string(output_parameters, node)?)
-}
+// fn serialize_xml<S: XmlDS>(
+//     arg: &Sequence<S::Node>,
+//     parameters: SerializationParameters,
+//     source: &mut S,
+// ) -> Result<String, error::Error> {
+//     let node = arg.normalize(&parameters.item_separator, source)?;
+//     let indentation = xot_indentation(&parameters, source);
+//     let cdata_section_elements = xot_names(&parameters.cdata_section_elements, source);
+//     let declaration = if !parameters.omit_xml_declaration {
+//         Some(xee_datasource::output::xml::Declaration {
+//             encoding: Some(parameters.encoding.to_string()),
+//             standalone: parameters.standalone,
+//         })
+//     } else {
+//         None
+//     };
+//     let doctype = match (parameters.doctype_public, parameters.doctype_system) {
+//         (Some(public), Some(system)) => {
+//             Some(xee_datasource::output::xml::DocType::Public { public, system })
+//         }
+//         (None, Some(system)) => Some(xee_datasource::output::xml::DocType::System { system }),
+//         // TODO: this should really not happen?
+//         (Some(public), None) => Some(xee_datasource::output::xml::DocType::Public {
+//             public,
+//             system: "".to_string(),
+//         }),
+//         (None, None) => None,
+//     };
+//     let output_parameters = xee_datasource::output::xml::Parameters {
+//         indentation,
+//         cdata_section_elements,
+//         declaration,
+//         doctype,
+//         ..Default::default()
+//     };
 
-fn serialize_html(
-    arg: &Sequence,
-    parameters: SerializationParameters,
-    xot: &mut Xot,
-) -> Result<String, error::Error> {
-    let node = arg.normalize(&parameters.item_separator, xot)?;
-    // TODO: no check yet for html version rejecting versions that aren't 5
-    let cdata_section_elements = xot_names(&parameters.cdata_section_elements, xot);
-    let indentation = xot_indentation(&parameters, xot);
-    let html5 = xot.html5();
-    let output_parameters = xot::output::html5::Parameters {
-        indentation,
-        cdata_section_elements,
-    };
-    Ok(html5.serialize_string(output_parameters, node)?)
-}
+//     Ok(source.serialize_xml_string(output_parameters, node)?)
+// }
 
-fn serialize_json(
-    arg: &Sequence,
+// fn serialize_html<S: XmlDS>(
+//     arg: &Sequence<S::Node>,
+//     parameters: SerializationParameters<S>,
+//     source: &mut S,
+// ) -> Result<String, error::Error> {
+//     let node = arg.normalize(&parameters.item_separator, source)?;
+//     // TODO: no check yet for html version rejecting versions that aren't 5
+//     let cdata_section_elements = xot_names(&parameters.cdata_section_elements, source);
+//     let indentation = xot_indentation(&parameters, source);
+//     let html5 = source.html5();
+//     let output_parameters = xee_datasource::output::html5::Parameters {
+//         indentation,
+//         cdata_section_elements,
+//     };
+//     Ok(html5.serialize_string(output_parameters, node)?)
+// }
+
+fn serialize_json<S: XmlDS>(
+    arg: &Sequence<S::Node>,
     parameters: SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<String, error::Error> {
-    let r = serialize_json_sequence(arg, &parameters, xot)?;
+    let r = serialize_json_sequence(arg, &parameters, source)?;
     Ok(r.dump())
 }
 
-fn serialize_json_sequence(
-    arg: &Sequence,
+fn serialize_json_sequence<S: XmlDS>(
+    arg: &Sequence<S::Node>,
     parameters: &SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<json::JsonValue, error::Error> {
     match arg {
-        Sequence::One(item) => serialize_json_item(item.item(), parameters, xot),
+        Sequence::One(item) => serialize_json_item(item.item(), parameters, source),
         Sequence::Empty(_) => Ok(json::JsonValue::Null),
         Sequence::Many(_) | Sequence::Range(_) => Err(error::Error::SERE0023),
     }
 }
 
-fn serialize_json_item(
-    item: &Item,
+fn serialize_json_item<S: XmlDS>(
+    item: &Item<S::Node>,
     parameters: &SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<json::JsonValue, error::Error> {
     match item {
         Item::Atomic(atomic) => serialize_json_atomic(atomic, parameters),
-        Item::Node(node) => serialize_json_node(*node, parameters, xot),
-        Item::Function(function) => serialize_json_function(function, parameters, xot),
+        Item::Node(node) => serialize_json_node(*node, parameters, source),
+        Item::Function(function) => serialize_json_function(function, parameters, source),
     }
 }
 
@@ -344,87 +350,87 @@ fn serialize_json_string(s: String, _parameters: &SerializationParameters) -> js
     json::JsonValue::String(s)
 }
 
-fn serialize_json_node(
-    node: xot::Node,
+fn serialize_json_node<S: XmlDS>(
+    node: S::Node,
     parameters: &SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<json::JsonValue, error::Error> {
     match parameters.json_node_output_method.local_name() {
         Some("xml") | Some("html") => {
             let xml_parameters = SerializationParameters::xml_in_json_serialization(
                 &parameters.json_node_output_method,
             );
-            let sequence: Sequence = vec![node].into();
-            let s = serialize_sequence(&sequence, xml_parameters, xot)?;
+            let sequence: Sequence<_> = vec![XmlNodeWrapper(node)].into();
+            let s = serialize_sequence(&sequence, xml_parameters, source)?;
             Ok(serialize_json_string(s, parameters))
         }
         _ => todo!(),
     }
 }
 
-fn serialize_json_function(
-    function: &function::Function,
+fn serialize_json_function<S: XmlDS>(
+    function: &function::Function<S::Node>,
     parameters: &SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<json::JsonValue, error::Error> {
     match function {
-        function::Function::Array(array) => serialize_json_array(array, parameters, xot),
-        function::Function::Map(map) => serialize_json_map(map, parameters, xot),
+        function::Function::Array(array) => serialize_json_array(array, parameters, source),
+        function::Function::Map(map) => serialize_json_map(map, parameters, source),
         _ => Err(error::Error::SERE0021),
     }
 }
 
-fn serialize_json_array(
-    array: &function::Array,
+fn serialize_json_array<S: XmlDS>(
+    array: &function::Array<S::Node>,
     parameters: &SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<json::JsonValue, error::Error> {
     let mut result = Vec::with_capacity(array.len());
     for entry in array.iter() {
-        let serialized = serialize_json_sequence(entry, parameters, xot)?;
+        let serialized = serialize_json_sequence(entry, parameters, source)?;
         result.push(serialized);
     }
     Ok(json::JsonValue::Array(result))
 }
 
-fn serialize_json_map(
-    map: &function::Map,
+fn serialize_json_map<S: XmlDS>(
+    map: &function::Map<S::Node>,
     parameters: &SerializationParameters,
-    xot: &mut Xot,
+    source: &mut S,
 ) -> Result<json::JsonValue, error::Error> {
     let mut result = json::object::Object::new();
     for key in map.keys() {
         let key_s = key.string_value();
         let value = map.get(key).unwrap();
-        let value = serialize_json_sequence(value, parameters, xot)?;
+        let value = serialize_json_sequence(value, parameters, source)?;
         result.insert(&key_s, value);
     }
     Ok(json::JsonValue::Object(result))
 }
 
-fn xot_indentation(
-    parameters: &SerializationParameters,
-    xot: &mut Xot,
-) -> Option<xot::output::Indentation> {
-    if !parameters.indent {
-        return None;
-    }
-    let suppress = xot_names(&parameters.suppress_indentation, xot);
-    Some(xot::output::Indentation { suppress })
-}
+// fn xot_indentation<S: XmlDS>(
+//     parameters: &SerializationParameters,
+//     source: &mut S,
+// ) -> Option<xee_datasource::output::Indentation> {
+//     if !parameters.indent {
+//         return None;
+//     }
+//     let suppress = xot_names(&parameters.suppress_indentation, source);
+//     Some(xee_datasource::output::Indentation { suppress })
+// }
 
-fn xot_names(names: &[xot::xmlname::OwnedName], xot: &mut Xot) -> Vec<xot::NameId> {
-    names
-        .iter()
-        .map(|owned_name| owned_name.to_ref(xot).name_id())
-        .collect()
-}
+// fn xot_names<S: XmlDS>(names: &[OwnedName], source: &mut S) -> Vec<S::NameId> {
+//     names
+//         .iter()
+//         .map(|owned_name| source.owned_name_to_ref(owned_name).name_id())
+//         .collect()
+// }
 
 #[cfg(test)]
 mod tests {
-    use crate::{atomic, sequence};
-
     use super::*;
+    use crate::{atomic, sequence};
+    use xot::Xot;
 
     #[test]
     fn test_allow_duplicate_names_true() {

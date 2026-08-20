@@ -1,25 +1,25 @@
-use xot::{Element, Node, NodeEdge, Xot};
+use xee_datasource::{Element, NodeEdge, XmlAttribAccess, XmlDS, XmlMutAttribAccess};
 
 #[derive(Debug)]
 enum Error {
-    Xot(xot::Error),
+    XmlSource(xee_datasource::Error),
     Internal,
 }
 
-impl From<xot::Error> for Error {
-    fn from(error: xot::Error) -> Self {
-        Self::Xot(error)
+impl From<xee_datasource::Error> for Error {
+    fn from(error: xee_datasource::Error) -> Self {
+        Self::XmlSource(error)
     }
 }
 
 // conditional element inclusion and pre-processing shadow-attributes
-fn preprocess(xot: &mut Xot, top: Node) -> Result<(), Error> {
-    let xsl_ns = xot.add_namespace("http://www.w3.org/1999/XSL/Transform");
-    let instruction_use_when = xot.add_name("use-when");
-    let xsl_use_when = xot.add_name_ns("use-when", xsl_ns);
-    let in_xsl_ns = |element: &Element| {
+fn preprocess<S: XmlDS>(source: &mut S, top: S::Node) -> Result<(), Error> {
+    let xsl_ns = source.add_namespace("http://www.w3.org/1999/XSL/Transform");
+    let instruction_use_when = source.add_name("use-when");
+    let xsl_use_when = source.add_name_ns("use-when", xsl_ns);
+    let in_xsl_ns = |element: &S::Element| {
         let name = element.name();
-        let namespace = xot.namespace_for_name(name);
+        let namespace = source.namespace_for_name(name);
         namespace == xsl_ns
     };
 
@@ -30,7 +30,7 @@ fn preprocess(xot: &mut Xot, top: Node) -> Result<(), Error> {
 
     let mut stack = Vec::new();
 
-    for edge in xot.traverse(top) {
+    for edge in source.traverse(top) {
         match edge {
             NodeEdge::Start(node) => {
                 // if we're in a removed element, we don't need to
@@ -40,10 +40,10 @@ fn preprocess(xot: &mut Xot, top: Node) -> Result<(), Error> {
                         continue;
                     }
                 }
-                if let Some(element) = xot.element(node) {
+                if let Some(element) = source.element(node) {
                     // record all shadow attributes to process
-                    for key in xot.attributes(node).keys() {
-                        let (name, ns) = xot.name_ns_str(key);
+                    for key in source.attributes(node).keys() {
+                        let (name, ns) = source.name_ns_str(key);
                         if ns.is_empty() && name.starts_with('_') {
                             let non_shadow_name = name[1..].to_string();
                             non_shadow_names.push(non_shadow_name);
@@ -56,7 +56,7 @@ fn preprocess(xot: &mut Xot, top: Node) -> Result<(), Error> {
                     } else {
                         xsl_use_when
                     };
-                    if let Some(value) = xot.attributes(node).get(use_when) {
+                    if let Some(value) = source.attributes(node).get(use_when) {
                         // TODO: replace with real xpath evaluation
                         if value == "false()" {
                             to_remove.push(node);
@@ -77,30 +77,30 @@ fn preprocess(xot: &mut Xot, top: Node) -> Result<(), Error> {
     }
 
     for non_shadow_name in non_shadow_names {
-        xot.add_name(&non_shadow_name);
+        source.add_name(&non_shadow_name);
     }
 
     for (node, shadow_name) in shadow_attributes {
-        let (name, _) = xot.name_ns_str(shadow_name);
+        let (name, _) = source.name_ns_str(shadow_name);
         let non_shadow_name = &name[1..];
-        let non_shadow_name = xot.name(non_shadow_name).ok_or(Error::Internal)?;
-        let value = xot
+        let non_shadow_name = source.name(non_shadow_name).ok_or(Error::Internal)?;
+        let value = source
             .attributes(node)
             .get(shadow_name)
             .ok_or(Error::Internal)?
             .to_string();
         // TODO execute xpath
-        let mut attributes = xot.attributes_mut(node);
+        let mut attributes = source.attributes_mut(node);
         attributes.insert(non_shadow_name, value);
         attributes.remove(shadow_name);
     }
 
     for node in to_remove {
-        xot.remove(node)?;
+        source.remove(node)?;
     }
 
     for (node, name) in to_remove_attribute {
-        xot.attributes_mut(node).remove(name);
+        source.attributes_mut(node).remove(name);
     }
 
     Ok(())
@@ -108,6 +108,8 @@ fn preprocess(xot: &mut Xot, top: Node) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    use xot::Xot;
+
     use super::*;
 
     #[test]

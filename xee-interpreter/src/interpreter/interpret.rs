@@ -3,11 +3,11 @@ use std::rc::Rc;
 
 use ibig::{ibig, IBig};
 
+use xee_datasource::xmlname::NameStrInfo;
+use xee_datasource::{Element, StringNewtype, ValueRef, XmlNode, XmlNodeWrapper};
 use xee_name::Name;
 use xee_schema_type::Xs;
 use xee_xpath_ast::ast;
-use xot::xmlname::NameStrInfo;
-use xot::Xot;
 
 use crate::atomic::{self, AtomicCompare};
 use crate::atomic::{
@@ -15,8 +15,9 @@ use crate::atomic::{
 };
 use crate::context::DynamicContext;
 use crate::function;
+use crate::function::XmlDS;
 use crate::pattern::PredicateMatcher;
-use crate::sequence;
+use crate::sequence::{self, Sequence};
 use crate::span::SourceSpan;
 use crate::stack;
 use crate::xml;
@@ -26,19 +27,19 @@ use super::instruction::{read_i16, read_instruction, read_u16, read_u8, EncodedI
 use super::runnable::Runnable;
 use super::state::State;
 
-pub struct Interpreter<'a> {
-    runnable: &'a Runnable<'a>,
-    pub(crate) state: State<'a>,
+pub struct Interpreter<'a, S: XmlDS> {
+    runnable: &'a Runnable<'a, S>,
+    pub(crate) state: State<'a, S>,
 }
 
-pub struct ContextInfo {
-    pub item: stack::Value,
-    pub position: stack::Value,
-    pub size: stack::Value,
+pub struct ContextInfo<N: XmlNode> {
+    pub item: stack::Value<N>,
+    pub position: stack::Value<N>,
+    pub size: stack::Value<N>,
 }
 
-impl From<sequence::Item> for ContextInfo {
-    fn from(item: sequence::Item) -> Self {
+impl<N: XmlNode> From<sequence::Item<N>> for ContextInfo<N> {
+    fn from(item: sequence::Item<N>) -> Self {
         ContextInfo {
             item: item.into(),
             position: ibig!(1).into(),
@@ -47,31 +48,35 @@ impl From<sequence::Item> for ContextInfo {
     }
 }
 
-impl<'a> Interpreter<'a> {
-    pub fn new(runnable: &'a Runnable<'a>, xot: &'a mut Xot) -> Self {
+impl<'a, S: XmlDS> Interpreter<'a, S> {
+    pub fn new(runnable: &'a Runnable<'a, S>, source: &'a mut S) -> Self {
         Interpreter {
             runnable,
-            state: State::new(xot),
+            state: State::new(source),
         }
     }
 
-    pub fn state(self) -> State<'a> {
+    pub fn state(self) -> State<'a, S> {
         self.state
     }
 
-    pub(crate) fn runnable(&self) -> &Runnable<'_> {
+    pub(crate) fn runnable(&self) -> &Runnable<'_, S> {
         self.runnable
     }
 
-    pub fn start(&mut self, context_info: ContextInfo, arguments: Vec<sequence::Sequence>) {
+    pub fn start(
+        &mut self,
+        context_info: ContextInfo<S::Node>,
+        arguments: Vec<sequence::Sequence<S::Node>>,
+    ) {
         self.start_function(self.runnable.program().main_id(), context_info, arguments)
     }
 
     fn start_function(
         &mut self,
         function_id: function::InlineFunctionId,
-        context_info: ContextInfo,
-        arguments: Vec<sequence::Sequence>,
+        context_info: ContextInfo<S::Node>,
+        arguments: Vec<sequence::Sequence<S::Node>>,
     ) {
         self.state.push_start_frame(function_id);
 
@@ -82,7 +87,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn push_context_info(&mut self, context_info: ContextInfo) {
+    fn push_context_info(&mut self, context_info: ContextInfo<S::Node>) {
         self.state.push_value(context_info.item);
         self.state.push_value(context_info.position);
         self.state.push_value(context_info.size);
@@ -132,7 +137,7 @@ impl<'a> Interpreter<'a> {
                     let a = a.to_str().unwrap();
                     let b = b.to_str().unwrap();
                     let result = a.to_string() + b;
-                    let item: sequence::Item = result.into();
+                    let item: sequence::Item<S::Node> = result.into();
                     self.state.push(item);
                 }
                 EncodedInstruction::Const => {
@@ -150,9 +155,9 @@ impl<'a> Interpreter<'a> {
                     for _ in 0..closure_function.closure_names.len() {
                         closure_vars.push(self.state.pop_value());
                     }
-                    let function: function::Function =
+                    let function: function::Function<S::Node> =
                         function::InlineFunctionData::new(inline_function_id, closure_vars).into();
-                    let item: sequence::Item = function.into();
+                    let item: sequence::Item<S::Node> = function.into();
                     self.state.push(item);
                 }
                 EncodedInstruction::StaticClosure => {
@@ -161,7 +166,7 @@ impl<'a> Interpreter<'a> {
                         function::StaticFunctionId(static_function_id as usize);
                     let static_closure =
                         self.create_static_closure_from_stack(static_function_id)?;
-                    let item: sequence::Item = static_closure.into();
+                    let item: sequence::Item<S::Node> = static_closure.into();
                     self.state.push(item);
                 }
                 EncodedInstruction::Var => {
@@ -184,30 +189,31 @@ impl<'a> Interpreter<'a> {
                 }
                 EncodedInstruction::CurlyArray => {
                     let sequence = self.state.pop()?;
-                    let array: function::Array = sequence.into();
+                    let array: function::Array<S::Node> = sequence.into();
                     self.state.push(array);
                 }
                 EncodedInstruction::SquareArray => {
                     let length = self.pop_atomic().unwrap();
                     let length = length.cast_to_integer_value::<i64>()?;
-                    let mut popped: Vec<sequence::Sequence> = Vec::with_capacity(length as usize);
+                    let mut popped: Vec<sequence::Sequence<S::Node>> =
+                        Vec::with_capacity(length as usize);
                     for _ in 0..length {
                         popped.push(self.state.pop()?);
                     }
-                    let item: sequence::Item = function::Array::new(popped).into();
+                    let item: sequence::Item<S::Node> = function::Array::new(popped).into();
                     self.state.push(item);
                 }
                 EncodedInstruction::CurlyMap => {
                     let length = self.pop_atomic().unwrap();
                     let length = length.cast_to_integer_value::<i64>()?;
-                    let mut popped: Vec<(atomic::Atomic, sequence::Sequence)> =
+                    let mut popped: Vec<(atomic::Atomic, sequence::Sequence<S::Node>)> =
                         Vec::with_capacity(length as usize);
                     for _ in 0..length {
                         let value = self.state.pop()?;
                         let key = self.pop_atomic()?;
                         popped.push((key, value));
                     }
-                    let item: sequence::Item = function::Map::new(popped)?.into();
+                    let item: sequence::Item<S::Node> = function::Map::new(popped)?.into();
                     self.state.push(item);
                 }
                 EncodedInstruction::Jump => {
@@ -284,7 +290,7 @@ impl<'a> Interpreter<'a> {
                         self.runnable
                             .documents()
                             .borrow()
-                            .document_order_access(self.xot()),
+                            .document_order_access(self.source()),
                     )?;
                     self.state.push(result);
                 }
@@ -300,7 +306,7 @@ impl<'a> Interpreter<'a> {
                         self.runnable
                             .documents()
                             .borrow()
-                            .document_order_access(self.xot()),
+                            .document_order_access(self.source()),
                     )?;
                     self.state.push(result);
                 }
@@ -312,7 +318,7 @@ impl<'a> Interpreter<'a> {
                         self.runnable
                             .documents()
                             .borrow()
-                            .document_order_access(self.xot()),
+                            .document_order_access(self.source()),
                     )?;
                     self.state.push(combined);
                 }
@@ -324,7 +330,7 @@ impl<'a> Interpreter<'a> {
                         self.runnable
                             .documents()
                             .borrow()
-                            .document_order_access(self.xot()),
+                            .document_order_access(self.source()),
                     )?;
                     self.state.push(combined);
                 }
@@ -336,7 +342,7 @@ impl<'a> Interpreter<'a> {
                         self.runnable
                             .documents()
                             .borrow()
-                            .document_order_access(self.xot()),
+                            .document_order_access(self.source()),
                     )?;
                     self.state.push(combined);
                 }
@@ -360,9 +366,9 @@ impl<'a> Interpreter<'a> {
                 }
                 EncodedInstruction::Step => {
                     let step_id = self.read_u16();
-                    let node: xot::Node = self.state.pop()?.try_into()?;
+                    let node: XmlNodeWrapper<S::Node> = self.state.pop()?.try_into()?;
                     let step = &(self.current_inline_function().steps[step_id as usize]);
-                    let value = xml::resolve_step(step, node, self.state.xot());
+                    let value = xml::resolve_step(step, node.into(), self.state.source());
                     self.state.push(value);
                 }
                 EncodedInstruction::Deduplicate => {
@@ -371,7 +377,7 @@ impl<'a> Interpreter<'a> {
                         self.runnable
                             .documents()
                             .borrow()
-                            .document_order_access(self.xot()),
+                            .document_order_access(self.source()),
                     )?;
                     self.state.push(value);
                 }
@@ -389,7 +395,7 @@ impl<'a> Interpreter<'a> {
                     let sequence = sequence.sequence_type_matching_function_conversion(
                         sequence_type,
                         self.runnable.static_context(),
-                        self.state.xot(),
+                        self.state.source(),
                         &|function| self.runnable.function_info(function).signature(),
                     )?;
                     self.state.push(sequence);
@@ -411,7 +417,9 @@ impl<'a> Interpreter<'a> {
                     } else if cast_type.empty_sequence_allowed {
                         self.state.push(sequence::Sequence::default());
                     } else {
-                        Err(error::Error::XPTY0004)?;
+                        Err(error::Error::XPTY0004(
+                            "Cast instruction encountered an empty sequence for a type that does not allow empty-sequence()",
+                        ))?;
                     }
                 }
                 EncodedInstruction::Castable => {
@@ -435,7 +443,7 @@ impl<'a> Interpreter<'a> {
                         &(self.current_inline_function().sequence_types[sequence_type_id as usize]);
                     let matches = sequence.sequence_type_matching(
                         sequence_type,
-                        self.state.xot(),
+                        self.state.source(),
                         &|function| self.runnable.function_info(function).signature(),
                     );
                     if matches.is_ok() {
@@ -451,7 +459,7 @@ impl<'a> Interpreter<'a> {
                         &(self.current_inline_function().sequence_types[sequence_type_id as usize]);
                     let matches = sequence.sequence_type_matching(
                         sequence_type,
-                        self.state.xot(),
+                        self.state.source(),
                         &|function| self.runnable.function_info(function).signature(),
                     );
                     if matches.is_err() {
@@ -461,8 +469,8 @@ impl<'a> Interpreter<'a> {
                 EncodedInstruction::Range => {
                     let b = self.state.pop()?;
                     let a = self.state.pop()?;
-                    let a = a.atomized_option(self.state.xot())?;
-                    let b = b.atomized_option(self.state.xot())?;
+                    let a = a.atomized_option(self.state.source())?;
+                    let b = b.atomized_option(self.state.source())?;
                     let (a, b) = match (a, b) {
                         (None, None) | (None, _) | (_, None) => {
                             self.state.push(sequence::Sequence::default());
@@ -482,7 +490,7 @@ impl<'a> Interpreter<'a> {
                         Ordering::Greater => self.state.push(sequence::Sequence::default()),
                         Ordering::Equal => self.state.push(a),
                         Ordering::Less => {
-                            let sequence: sequence::Sequence =
+                            let sequence: sequence::Sequence<S::Node> =
                                 sequence::Range::new(a, b + 1)?.into();
                             self.state.push(sequence)
                         }
@@ -499,8 +507,10 @@ impl<'a> Interpreter<'a> {
                     let index = self.pop_atomic()?;
                     let index = index.cast_to_integer_value::<i64>()? as usize;
                     // substract 1 as Xpath is 1-indexed
-                    let item = value.get(index - 1).ok_or(error::Error::XPTY0004)?;
-                    let sequence: sequence::Sequence = item.into();
+                    let item = value.get(index - 1).ok_or(error::Error::XPTY0004(
+                        "SequenceGet instruction called with an index out of bounds",
+                    ))?;
+                    let sequence: sequence::Sequence<S::Node> = item.into();
                     self.state.push(sequence)
                 }
                 EncodedInstruction::BuildNew => {
@@ -526,13 +536,13 @@ impl<'a> Interpreter<'a> {
                     self.state.push(name);
                 }
                 EncodedInstruction::XmlDocument => {
-                    let root_node = self.state.xot.new_document();
+                    let root_node = self.state.source.new_document();
                     let item = sequence::Item::Node(root_node);
                     self.state.push(item);
                 }
                 EncodedInstruction::XmlElement => {
                     let name_id = self.pop_xot_name()?;
-                    let element_node = self.state.xot.new_element(name_id);
+                    let element_node = self.state.source.new_element(name_id);
                     let item = sequence::Item::Node(element_node);
                     self.state.push(item);
                 }
@@ -541,31 +551,34 @@ impl<'a> Interpreter<'a> {
                     let name_id = self.pop_xot_name()?;
                     let attribute_node = self
                         .state
-                        .xot
+                        .source
                         .new_attribute_node(name_id, value.string_value());
                     let item = sequence::Item::Node(attribute_node);
                     self.state.push(item);
                 }
                 EncodedInstruction::XmlNamespace => {
                     let uri = self.pop_atomic()?;
-                    let namespace_id = self.state.xot.add_namespace(&uri.string_value());
+                    let namespace_id = self.state.source.add_namespace(&uri.string_value());
                     let prefix = self.pop_atomic()?;
-                    let prefix_id = self.state.xot.add_prefix(&prefix.string_value());
-                    let namespace_node = self.state.xot.new_namespace_node(prefix_id, namespace_id);
+                    let prefix_id = self.state.source.add_prefix(&prefix.string_value());
+                    let namespace_node = self
+                        .state
+                        .source
+                        .new_namespace_node(prefix_id, namespace_id);
                     let item = sequence::Item::Node(namespace_node);
                     self.state.push(item);
                 }
                 EncodedInstruction::XmlText => {
                     let text_atomic = self.pop_atomic()?;
                     let text = text_atomic.into_canonical();
-                    let text_node = self.state.xot.new_text(&text);
+                    let text_node = self.state.source.new_text(&text);
                     let item = sequence::Item::Node(text_node);
                     self.state.push(item);
                 }
                 EncodedInstruction::XmlComment => {
                     let text_atomic = self.pop_atomic()?;
                     let text = text_atomic.into_canonical();
-                    let comment_node = self.state.xot.new_comment(&text);
+                    let comment_node = self.state.source.new_comment(&text);
                     let item = sequence::Item::Node(comment_node);
                     self.state.push(item);
                 }
@@ -579,8 +592,11 @@ impl<'a> Interpreter<'a> {
                     };
                     let target_atomic = self.pop_atomic()?;
                     let target = target_atomic.into_canonical();
-                    let target_id = self.state.xot.add_name(&target);
-                    let pi_node = self.state.xot.new_processing_instruction(target_id, text);
+                    let target_id = self.state.source.add_name(&target);
+                    let pi_node = self
+                        .state
+                        .source
+                        .new_processing_instruction(target_id, text);
                     let item = sequence::Item::Node(pi_node);
                     self.state.push(item);
                 }
@@ -622,7 +638,7 @@ impl<'a> Interpreter<'a> {
                         let copy = match &item {
                             sequence::Item::Atomic(_) | sequence::Item::Function(_) => item.clone(),
                             sequence::Item::Node(node) => {
-                                let copied_node = self.state.xot.clone_node(*node);
+                                let copied_node = self.state.source.clone_node(*node);
                                 sequence::Item::Node(copied_node)
                             }
                         };
@@ -652,7 +668,7 @@ impl<'a> Interpreter<'a> {
     pub(crate) fn create_static_closure_from_stack(
         &mut self,
         static_function_id: function::StaticFunctionId,
-    ) -> error::Result<function::Function> {
+    ) -> error::Result<function::Function<S::Node>> {
         Self::create_static_closure(self.runnable.dynamic_context(), static_function_id, || {
             Some(self.state.pop_value())
         })
@@ -661,23 +677,20 @@ impl<'a> Interpreter<'a> {
     pub(crate) fn create_static_closure_from_context(
         &mut self,
         static_function_id: function::StaticFunctionId,
-        arg: Option<xot::Node>,
-    ) -> error::Result<function::Function> {
+        arg: Option<S::Node>,
+    ) -> error::Result<function::Function<S::Node>> {
         Self::create_static_closure(self.runnable.dynamic_context(), static_function_id, || {
-            arg.map(|n| {
-                let value: stack::Value = n.into();
-                value
-            })
+            arg.map(|n| Sequence::<S::Node>::from(XmlNodeWrapper(n)).into())
         })
     }
 
     pub(crate) fn create_static_closure<F>(
-        context: &DynamicContext,
+        context: &DynamicContext<S>,
         static_function_id: function::StaticFunctionId,
         mut get: F,
-    ) -> error::Result<function::Function>
+    ) -> error::Result<function::Function<S::Node>>
     where
-        F: FnMut() -> Option<stack::Value>,
+        F: FnMut() -> Option<stack::Value<S::Node>>,
     {
         let static_function = &context.static_context().function_by_id(static_function_id);
         // get any context value from the stack if needed
@@ -694,17 +707,17 @@ impl<'a> Interpreter<'a> {
         Ok(function::StaticFunctionData::new(static_function_id, closure_vars).into())
     }
 
-    pub(crate) fn current_inline_function(&self) -> &function::InlineFunction {
+    pub(crate) fn current_inline_function(&self) -> &function::InlineFunction<S> {
         self.runnable
             .program()
             .inline_function(self.state.frame().function())
     }
 
-    pub(crate) fn function_name(&self, function: &function::Function) -> Option<Name> {
+    pub(crate) fn function_name(&self, function: &function::Function<S::Node>) -> Option<Name> {
         self.runnable.function_info(function).name()
     }
 
-    pub(crate) fn function_arity(&self, function: &function::Function) -> usize {
+    pub(crate) fn function_arity(&self, function: &function::Function<S::Node>) -> usize {
         self.runnable.function_info(function).arity()
     }
 
@@ -715,11 +728,11 @@ impl<'a> Interpreter<'a> {
 
     pub(crate) fn call_function_with_arguments(
         &mut self,
-        function: &function::Function,
-        arguments: &[sequence::Sequence],
-    ) -> error::Result<sequence::Sequence> {
+        function: &function::Function<S::Node>,
+        arguments: &[sequence::Sequence<S::Node>],
+    ) -> error::Result<sequence::Sequence<S::Node>> {
         // put function onto the stack
-        let item: sequence::Item = function.clone().into();
+        let item: sequence::Item<S::Node> = function.clone().into();
         self.state.push(item);
         // then arguments
         let arity = arguments.len() as u8;
@@ -735,7 +748,11 @@ impl<'a> Interpreter<'a> {
         self.state.pop()
     }
 
-    fn call_function(&mut self, function: &function::Function, arity: u8) -> error::Result<()> {
+    fn call_function(
+        &mut self,
+        function: &function::Function<S::Node>,
+        arity: u8,
+    ) -> error::Result<()> {
         match function {
             function::Function::Static(data) => {
                 self.call_static(data.id, arity, &data.closure_vars)
@@ -746,7 +763,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub(crate) fn arguments(&self, arity: u8) -> &[stack::Value] {
+    pub(crate) fn arguments(&self, arity: u8) -> &[stack::Value<S::Node>] {
         self.state.arguments(arity as usize)
     }
 
@@ -754,11 +771,13 @@ impl<'a> Interpreter<'a> {
         &mut self,
         static_function_id: function::StaticFunctionId,
         arity: u8,
-        closure_vars: &[stack::Value],
+        closure_vars: &[stack::Value<S::Node>],
     ) -> error::Result<()> {
         let static_function = self.runnable.program().static_function(static_function_id);
         if arity as usize != static_function.arity() {
-            return Err(error::Error::XPTY0004);
+            return Err(error::Error::XPTY0004(
+                "call_static called with the wrong number of arguments for the static function",
+            ));
         }
         let parameter_types = static_function.signature().parameter_types();
         let arguments = self.coerce_arguments(parameter_types, arity)?;
@@ -779,7 +798,9 @@ impl<'a> Interpreter<'a> {
         let function = self.runnable.program().inline_function(function_id);
         let parameter_types = &function.signature.parameter_types();
         if arity as usize != parameter_types.len() {
-            return Err(error::Error::XPTY0004);
+            return Err(error::Error::XPTY0004(
+                "call_inline called with the wrong number of arguments for the inline function",
+            ));
         }
 
         let arguments = self.coerce_arguments(parameter_types, arity)?;
@@ -797,7 +818,7 @@ impl<'a> Interpreter<'a> {
         &mut self,
         parameter_types: &[Option<ast::SequenceType>],
         arity: u8,
-    ) -> error::Result<Vec<sequence::Sequence>> {
+    ) -> error::Result<Vec<sequence::Sequence<S::Node>>> {
         // TODO: fast path if no sequence type declarations exist for
         // parameters could cache this inside of signature so that it's really
         // fast to detect.
@@ -809,15 +830,15 @@ impl<'a> Interpreter<'a> {
         let stack_values = self.state.arguments(arity as usize);
         let mut arguments = Vec::with_capacity(arity as usize);
         let static_context = self.runnable.static_context();
-        let xot = self.state.xot();
+        let source = self.state.source();
         for (parameter_type, stack_value) in parameter_types.iter().zip(stack_values) {
-            let sequence: sequence::Sequence = stack_value.try_into()?;
+            let sequence: sequence::Sequence<S::Node> = stack_value.try_into()?;
             if let Some(type_) = parameter_type {
                 // matching also takes care of function conversion rules
                 let sequence = sequence.sequence_type_matching_function_conversion(
                     type_,
                     static_context,
-                    xot,
+                    source,
                     &|function| self.runnable.function_info(function).signature(),
                 )?;
                 arguments.push(sequence);
@@ -830,9 +851,11 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
-    fn call_array(&mut self, array: &function::Array, arity: usize) -> error::Result<()> {
+    fn call_array(&mut self, array: &function::Array<S::Node>, arity: usize) -> error::Result<()> {
         if arity != 1 {
-            return Err(error::Error::XPTY0004);
+            return Err(error::Error::XPTY0004(
+                "call_array called with an arity other than 1",
+            ));
         }
         // the argument
         let position = self.pop_atomic()?;
@@ -845,12 +868,14 @@ impl<'a> Interpreter<'a> {
     }
 
     fn array_get(
-        array: &function::Array,
+        array: &function::Array<S::Node>,
         position: atomic::Atomic,
-    ) -> error::Result<sequence::Sequence> {
-        let position = position
-            .cast_to_integer_value::<i64>()
-            .map_err(|_| error::Error::XPTY0004)?;
+    ) -> error::Result<sequence::Sequence<S::Node>> {
+        let position = position.cast_to_integer_value::<i64>().map_err(|_| {
+            error::Error::XPTY0004(
+                "array_get called with a position argument that is not castable to an integer",
+            )
+        })?;
         let position = position as usize;
         if position == 0 {
             return Err(error::Error::FOAY0001);
@@ -860,9 +885,11 @@ impl<'a> Interpreter<'a> {
         sequence.cloned().ok_or(error::Error::FOAY0001)
     }
 
-    fn call_map(&mut self, map: &function::Map, arity: usize) -> error::Result<()> {
+    fn call_map(&mut self, map: &function::Map<S::Node>, arity: usize) -> error::Result<()> {
         if arity != 1 {
-            return Err(error::Error::XPTY0004);
+            return Err(error::Error::XPTY0004(
+                "call_map called with an arity other than 1",
+            ));
         }
         let key = self.pop_atomic()?;
         let value = map.get(&key);
@@ -879,30 +906,32 @@ impl<'a> Interpreter<'a> {
     fn lookup(&mut self) -> error::Result<()> {
         let key_specifier = self.state.pop()?;
         let value = self.state.pop()?;
-        let function: function::Function = value.try_into()?;
+        let function: function::Function<S::Node> = value.try_into()?;
         let value = self.lookup_value(&function, key_specifier)?;
-        let sequence: sequence::Sequence = value.into();
+        let sequence: sequence::Sequence<S::Node> = value.into();
         self.state.push(sequence);
         Ok(())
     }
 
     fn lookup_value(
         &self,
-        function: &function::Function,
-        key_specifier: sequence::Sequence,
-    ) -> error::Result<Vec<sequence::Item>> {
+        function: &function::Function<S::Node>,
+        key_specifier: sequence::Sequence<S::Node>,
+    ) -> error::Result<Vec<sequence::Item<S::Node>>> {
         match function {
             function::Function::Map(map) => self.lookup_map(map, key_specifier),
             function::Function::Array(array) => self.lookup_array(array, key_specifier),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "lookup_value called on a Function that is neither a Map nor an Array",
+            )),
         }
     }
 
     fn lookup_map(
         &self,
-        map: &function::Map,
-        key_specifier: sequence::Sequence,
-    ) -> error::Result<Vec<sequence::Item>> {
+        map: &function::Map<S::Node>,
+        key_specifier: sequence::Sequence<S::Node>,
+    ) -> error::Result<Vec<sequence::Item<S::Node>>> {
         self.lookup_helper(key_specifier, map, |map, atomic| {
             Ok(map.get(&atomic).cloned().unwrap_or_default())
         })
@@ -910,23 +939,25 @@ impl<'a> Interpreter<'a> {
 
     fn lookup_array(
         &self,
-        array: &function::Array,
-        key_specifier: sequence::Sequence,
-    ) -> error::Result<Vec<sequence::Item>> {
+        array: &function::Array<S::Node>,
+        key_specifier: sequence::Sequence<S::Node>,
+    ) -> error::Result<Vec<sequence::Item<S::Node>>> {
         self.lookup_helper(key_specifier, array, |array, atomic| match atomic {
             atomic::Atomic::Integer(..) => Self::array_get(array, atomic),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "lookup_array called with a key that is not an integer",
+            )),
         })
     }
 
     fn lookup_helper<T>(
         &self,
-        key_specifier: sequence::Sequence,
+        key_specifier: sequence::Sequence<S::Node>,
         data: T,
-        get_key: impl Fn(&T, atomic::Atomic) -> error::Result<sequence::Sequence>,
-    ) -> error::Result<Vec<sequence::Item>> {
+        get_key: impl Fn(&T, atomic::Atomic) -> error::Result<sequence::Sequence<S::Node>>,
+    ) -> error::Result<Vec<sequence::Item<S::Node>>> {
         let keys = key_specifier
-            .atomized(self.state.xot())
+            .atomized(self.state.source())
             .collect::<error::Result<Vec<_>>>()?;
         let mut result = Vec::new();
         for key in keys {
@@ -939,7 +970,7 @@ impl<'a> Interpreter<'a> {
 
     fn wildcard_lookup(&mut self) -> error::Result<()> {
         let value = self.state.pop()?;
-        let function: function::Function = value.try_into()?;
+        let function: function::Function<S::Node> = value.try_into()?;
         let value = match function {
             function::Function::Map(map) => {
                 let mut result = Vec::new();
@@ -960,9 +991,13 @@ impl<'a> Interpreter<'a> {
                 }
                 result
             }
-            _ => return Err(error::Error::XPTY0004),
+            _ => {
+                return Err(error::Error::XPTY0004(
+                    "wildcard_lookup called on a Function that is neither a Map nor an Array",
+                ))
+            }
         };
-        let sequence: sequence::Sequence = value.into();
+        let sequence: sequence::Sequence<S::Node> = value.into();
         self.state.push(sequence);
         Ok(())
     }
@@ -984,7 +1019,7 @@ impl<'a> Interpreter<'a> {
             op,
             self.runnable.default_collation()?.as_ref(),
             self.runnable.implicit_timezone(),
-            self.state.xot(),
+            self.state.source(),
         )?;
         self.state.push(v);
         Ok(())
@@ -997,7 +1032,7 @@ impl<'a> Interpreter<'a> {
         let b = self.state.pop()?;
         let a = self.state.pop()?;
         let value =
-            a.general_comparison(&b, op, self.runnable.dynamic_context(), self.state.xot())?;
+            a.general_comparison(&b, op, self.runnable.dynamic_context(), self.state.source())?;
         self.state.push(value);
         Ok(())
     }
@@ -1021,8 +1056,8 @@ impl<'a> Interpreter<'a> {
             self.state.push(sequence::Sequence::default());
             return Ok(());
         }
-        let a = a.atomized_one(self.state.xot())?;
-        let b = b.atomized_one(self.state.xot())?;
+        let a = a.atomized_one(self.state.source())?;
+        let b = b.atomized_one(self.state.source())?;
         let result = op(a, b, self.runnable.implicit_timezone())?;
         self.state.push(result);
         Ok(())
@@ -1037,7 +1072,7 @@ impl<'a> Interpreter<'a> {
             self.state.push(sequence::Sequence::default());
             return Ok(());
         }
-        let a = a.atomized_one(self.state.xot())?;
+        let a = a.atomized_one(self.state.source())?;
         let value = op(a)?;
         self.state.push(value);
         Ok(())
@@ -1045,7 +1080,7 @@ impl<'a> Interpreter<'a> {
 
     fn pop_is_numeric(&mut self) -> error::Result<bool> {
         let value = self.state.pop()?;
-        let a = value.atomized_option(self.state.xot())?;
+        let a = value.atomized_option(self.state.source())?;
         if let Some(a) = a {
             Ok(a.is_numeric())
         } else {
@@ -1055,23 +1090,23 @@ impl<'a> Interpreter<'a> {
 
     fn pop_atomic(&mut self) -> error::Result<atomic::Atomic> {
         let value = self.state.pop()?;
-        value.atomized_one(self.state.xot())
+        value.atomized_one(self.state.source())
     }
 
     fn pop_atomic_option(&mut self) -> error::Result<Option<atomic::Atomic>> {
         let value = self.state.pop()?;
-        value.atomized_option(self.state.xot())
+        value.atomized_option(self.state.source())
     }
 
-    fn pop_xot_name(&mut self) -> error::Result<xot::NameId> {
+    fn pop_xot_name(&mut self) -> error::Result<S::NameId> {
         let value = self.pop_atomic()?;
         let name: xee_name::Name = value.try_into()?;
         let namespace = name.namespace();
-        let ns = self.state.xot.add_namespace(namespace);
-        Ok(self.state.xot.add_name_ns(name.local_name(), ns))
+        let ns = self.state.source.add_namespace(namespace);
+        Ok(self.state.source.add_name_ns(name.local_name(), ns))
     }
 
-    fn pop_node(&mut self) -> error::Result<xot::Node> {
+    fn pop_node(&mut self) -> error::Result<S::Node> {
         let value = self.state.pop()?;
         let node = value.one()?.to_node()?;
         Ok(node)
@@ -1096,22 +1131,22 @@ impl<'a> Interpreter<'a> {
         a.effective_boolean_value()
     }
 
-    pub(crate) fn regex(&self, pattern: &str, flags: &str) -> error::Result<Rc<regexml::Regex>> {
+    pub fn regex(&self, pattern: &str, flags: &str) -> error::Result<Rc<regexml::Regex>> {
         self.state.regex(pattern, flags)
     }
 
-    pub(crate) fn xot(&self) -> &Xot {
-        self.state.xot()
+    pub fn source(&self) -> &S {
+        self.state.source()
     }
 
-    pub(crate) fn xot_mut(&mut self) -> &mut Xot {
-        self.state.xot_mut()
+    pub(crate) fn xot_mut(&mut self) -> &mut S {
+        self.state.source_mut()
     }
 
     fn xml_append(
         &mut self,
-        parent_node: xot::Node,
-        value: sequence::Sequence,
+        parent_node: S::Node,
+        value: sequence::Sequence<S::Node>,
     ) -> error::Result<()> {
         let mut string_values = Vec::new();
         for item in value.iter() {
@@ -1123,14 +1158,14 @@ impl<'a> Interpreter<'a> {
                         self.xml_append_string_values(parent_node, &string_values);
                         string_values.clear();
                     }
-                    match self.state.xot.value(node) {
-                        xot::Value::Document => {
+                    match self.state.source.value(node) {
+                        ValueRef::Document => {
                             // TODO: Handle adding all the children instead
                             return Err(error::Error::Unsupported(String::from(
                                 "Appending a whole document is not supported yet",
                             )));
                         }
-                        xot::Value::Text(text) if text.get().is_empty() => {
+                        ValueRef::Text(text) if text.get().is_empty() => {
                             // zero length text nodes are skipped
                             // Can this even exist, or does Xot not have
                             // them anyway?
@@ -1141,14 +1176,14 @@ impl<'a> Interpreter<'a> {
 
                     // if we have a parent we're already in another document,
                     // in which case we want to make a clone first
-                    let node = if self.state.xot.parent(node).is_some() {
-                        self.state.xot.clone_node(node)
+                    let node = if self.state.source.parent(node).is_some() {
+                        self.state.source.clone_node(node)
                     } else {
                         node
                     };
                     // TODO: error out if namespace or attribute node
                     // is added once a normal child already exists
-                    self.state.xot.any_append(parent_node, node).unwrap();
+                    self.state.source.any_append(parent_node, node).unwrap();
                 }
                 sequence::Item::Atomic(atomic) => string_values.push(atomic.string_value()),
                 sequence::Item::Function(_) => return Err(error::Error::XTDE0450),
@@ -1161,32 +1196,32 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    fn xml_append_string_values(&mut self, parent_node: xot::Node, string_values: &[String]) {
+    fn xml_append_string_values(&mut self, parent_node: S::Node, string_values: &[String]) {
         let text = string_values.join(" ");
-        let text_node = self.state.xot.new_text(&text);
-        self.state.xot.append(parent_node, text_node).unwrap();
+        let text_node = self.state.source.new_text(&text);
+        self.state.source.append(parent_node, text_node).unwrap();
     }
 
-    fn shallow_copy_node(&mut self, node: xot::Node) -> xot::Node {
-        let xot = &mut self.state.xot;
-        let value = xot.value(node);
+    fn shallow_copy_node(&mut self, node: S::Node) -> S::Node {
+        let source = &mut self.state.source;
+        let value = source.value(node);
         match value {
             // root and element are shallow copies
-            xot::Value::Document => xot.new_document(),
+            ValueRef::Document => source.new_document(),
             // TODO: work on copying prefixes
-            xot::Value::Element(element) => xot.new_element(element.name()),
+            ValueRef::Element(element) => source.new_element(element.name()),
             // we can clone (deep-copy) these nodes as it's the same
             // operation as shallow copy
-            _ => xot.clone_node(node),
+            _ => source.clone_node(node),
         }
     }
 
     fn apply_templates_sequence(
         &mut self,
         mode: pattern::ModeId,
-        sequence: sequence::Sequence,
-    ) -> error::Result<sequence::Sequence> {
-        let mut r: Vec<sequence::Item> = Vec::new();
+        sequence: sequence::Sequence<S::Node>,
+    ) -> error::Result<sequence::Sequence<S::Node>> {
+        let mut r: Vec<sequence::Item<S::Node>> = Vec::new();
         let size: IBig = sequence.len().into();
 
         for (i, item) in sequence.iter().enumerate() {
@@ -1203,15 +1238,15 @@ impl<'a> Interpreter<'a> {
     fn apply_templates_item(
         &mut self,
         mode: pattern::ModeId,
-        item: sequence::Item,
+        item: sequence::Item<S::Node>,
         position: usize,
         size: IBig,
-    ) -> error::Result<Option<sequence::Sequence>> {
+    ) -> error::Result<Option<sequence::Sequence<S::Node>>> {
         let function_id = self.lookup_pattern(mode, &item);
 
         if let Some(function_id) = function_id {
             let position: IBig = (position + 1).into();
-            let arguments: Vec<sequence::Sequence> = vec![
+            let arguments: Vec<sequence::Sequence<S::Node>> = vec![
                 item.into(),
                 atomic::Atomic::from(position).into(),
                 atomic::Atomic::from(size.clone()).into(),
@@ -1227,7 +1262,7 @@ impl<'a> Interpreter<'a> {
     pub(crate) fn lookup_pattern(
         &mut self,
         mode: pattern::ModeId,
-        item: &sequence::Item,
+        item: &sequence::Item<S::Node>,
     ) -> Option<function::InlineFunctionId> {
         self.runnable
             .program()

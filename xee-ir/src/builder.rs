@@ -1,3 +1,4 @@
+use xee_interpreter::function::XmlDS;
 use xee_xpath_ast::ast;
 
 use xee_interpreter::interpreter::instruction::{
@@ -22,19 +23,19 @@ pub(crate) enum JumpCondition {
     False,
 }
 
-pub struct FunctionBuilder<'a> {
-    program: &'a mut interpreter::Program,
+pub struct FunctionBuilder<'a, S: XmlDS> {
+    program: &'a mut interpreter::Program<S>,
     compiled: Vec<u8>,
     spans: Vec<span::SourceSpan>,
-    constants: Vec<sequence::Sequence>,
+    constants: Vec<sequence::Sequence<S::Node>>,
     steps: Vec<xml::Step>,
     cast_types: Vec<function::CastType>,
     sequence_types: Vec<ast::SequenceType>,
     closure_names: Vec<ir::Name>,
 }
 
-impl<'a> FunctionBuilder<'a> {
-    pub fn new(program: &'a mut interpreter::Program) -> Self {
+impl<'a, S: XmlDS> FunctionBuilder<'a, S> {
+    pub fn new(program: &'a mut interpreter::Program<S>) -> Self {
         FunctionBuilder {
             program,
             compiled: Vec::new(),
@@ -47,7 +48,7 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
-    pub(crate) fn static_context(&self) -> &context::StaticContext {
+    pub(crate) fn static_context(&self) -> &context::StaticContext<S> {
         self.program.static_context()
     }
 
@@ -58,7 +59,11 @@ impl<'a> FunctionBuilder<'a> {
         encode_instruction(instruction, &mut self.compiled);
     }
 
-    pub(crate) fn emit_constant(&mut self, constant: sequence::Sequence, span: span::SourceSpan) {
+    pub(crate) fn emit_constant(
+        &mut self,
+        constant: sequence::Sequence<S::Node>,
+        span: span::SourceSpan,
+    ) {
         let constant_id = self.constants.len();
         self.constants.push(constant);
         if constant_id > (u16::MAX as usize) {
@@ -166,7 +171,7 @@ impl<'a> FunctionBuilder<'a> {
         name: String,
         function_definition: &ir::FunctionDefinition,
         span: span::SourceSpan,
-    ) -> function::InlineFunction {
+    ) -> function::InlineFunction<S> {
         if let Some(return_type) = &function_definition.return_type {
             let sequence_type_id = self.add_sequence_type(return_type.clone());
             if sequence_type_id > (u16::MAX as usize) {
@@ -188,13 +193,13 @@ impl<'a> FunctionBuilder<'a> {
         }
     }
 
-    pub(crate) fn builder(&mut self) -> FunctionBuilder<'_> {
+    pub(crate) fn builder(&mut self) -> FunctionBuilder<'_, S> {
         FunctionBuilder::new(self.program)
     }
 
     pub(crate) fn add_function(
         &mut self,
-        function: function::InlineFunction,
+        function: function::InlineFunction<S>,
     ) -> function::InlineFunctionId {
         self.program.add_function(function)
     }

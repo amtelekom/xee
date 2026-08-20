@@ -19,7 +19,7 @@
 //! use xee_xpath::{Documents, Queries, Query};
 //!
 //! // create a new documents object
-//! let mut documents = Documents::new();
+//! let mut documents = Documents::new(::xot::Xot::new());
 //! // load a document from a string
 //! let doc = documents.add_string("http://example.com".try_into().unwrap(), "<root>foo</root>").unwrap();
 //!

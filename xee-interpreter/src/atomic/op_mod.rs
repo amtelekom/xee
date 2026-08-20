@@ -20,7 +20,9 @@ pub(crate) fn op_mod(a: atomic::Atomic, b: atomic::Atomic) -> error::Result<atom
         (Atomic::Integer(_, a), Atomic::Integer(_, b)) => Ok(op_mod_integer(a, b)?),
         (Atomic::Float(a), Atomic::Float(b)) => Ok(op_mod_float(a, b)?),
         (Atomic::Double(a), Atomic::Double(b)) => Ok(op_mod_float(a, b)?),
-        _ => Err(error::Error::XPTY0004),
+        _ => Err(error::Error::XPTY0004(
+            "op_mod called with an unsupported combination of Atomic types",
+        )),
     }
 }
 

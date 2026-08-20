@@ -1,6 +1,7 @@
 use ahash::{HashMap, HashMapExt};
 use std::fmt::{Debug, Formatter};
-use xot::xmlname::NameStrInfo;
+use xee_datasource::xmlname::NameStrInfo;
+use xee_datasource::{XmlDS, XmlNode};
 
 use xee_name::{Name, Namespaces};
 use xee_xpath_ast::ast;
@@ -14,7 +15,7 @@ use crate::sequence;
 use crate::stack;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Copy)]
-pub(crate) enum FunctionKind {
+pub enum FunctionKind {
     // generate a function with one less arity that takes the
     // item as the first argument
     ItemFirst,
@@ -37,7 +38,7 @@ pub(crate) enum FunctionKind {
 }
 
 impl FunctionKind {
-    pub(crate) fn parse(s: &str) -> Option<FunctionKind> {
+    pub fn parse(s: &str) -> Option<FunctionKind> {
         match s {
             "" => None,
             "context_first" => Some(FunctionKind::ItemFirst),
@@ -52,28 +53,31 @@ impl FunctionKind {
     }
 }
 
-pub(crate) type StaticFunctionType = fn(
-    context: &DynamicContext,
-    interpreter: &mut interpreter::Interpreter,
-    arguments: &[sequence::Sequence],
-) -> error::Result<sequence::Sequence>;
+#[allow(type_alias_bounds)]
+pub type StaticFunctionType<S: XmlDS + SourceSpecificFunctions> =
+    fn(
+        context: &DynamicContext<S>,
+        interpreter: &mut interpreter::Interpreter<S>,
+        arguments: &[sequence::Sequence<S::Node>],
+    ) -> error::Result<sequence::Sequence<S::Node>>;
 
-pub(crate) struct StaticFunctionDescription {
-    pub(crate) name: Name,
-    pub(crate) signature: function::Signature,
-    pub(crate) function_kind: Option<FunctionKind>,
-    pub(crate) func: StaticFunctionType,
+pub struct StaticFunctionDescription<S: XmlDS + SourceSpecificFunctions> {
+    pub name: Name,
+    pub signature: function::Signature,
+    pub function_kind: Option<FunctionKind>,
+    pub func: StaticFunctionType<S>,
 }
 
 // Wraps a Rust function annotated with `#[xpath_fn]` and turns it
 // into a StaticFunctionDescription
+// Requires second parameter source to be a generic type implementing XmlDS (usually called `S`)
 #[macro_export]
 macro_rules! wrap_xpath_fn {
-    ($function:path) => {{
+    ($function:path, $source:ident) => {{
         use $function as wrapped_function;
         let namespaces = &xee_name::DEFAULT_NAMESPACES;
-        $crate::function::StaticFunctionDescription::new(
-            wrapped_function::WRAPPER,
+        $crate::function::StaticFunctionDescription::<$source>::new(
+            wrapped_function::Wrapper::<$source>::WRAPPER,
             wrapped_function::SIGNATURE,
             $crate::function::FunctionKind::parse(wrapped_function::KIND),
             namespaces,
@@ -81,9 +85,9 @@ macro_rules! wrap_xpath_fn {
     }};
 }
 
-impl StaticFunctionDescription {
-    pub(crate) fn new(
-        func: StaticFunctionType,
+impl<S: XmlDS + SourceSpecificFunctions> StaticFunctionDescription<S> {
+    pub fn new(
+        func: StaticFunctionType<S>,
         signature: &str,
         function_kind: Option<FunctionKind>,
         namespaces: &Namespaces,
@@ -103,7 +107,7 @@ impl StaticFunctionDescription {
         }
     }
 
-    fn functions(&self) -> Vec<StaticFunction> {
+    fn functions(&self) -> Vec<StaticFunction<S>> {
         if let Some(function_kind) = &self.function_kind {
             self.signature
                 .alternative_signatures(*function_kind)
@@ -148,15 +152,15 @@ impl From<FunctionKind> for FunctionRule {
     }
 }
 
-pub struct StaticFunction {
+pub struct StaticFunction<S: XmlDS + SourceSpecificFunctions> {
     name: Name,
     signature: function::Signature,
     arity: usize,
     pub function_rule: Option<FunctionRule>,
-    func: StaticFunctionType,
+    func: StaticFunctionType<S>,
 }
 
-impl Debug for StaticFunction {
+impl<S: XmlDS + SourceSpecificFunctions> Debug for StaticFunction<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StaticFunction")
             .field("name", &self.name)
@@ -166,9 +170,9 @@ impl Debug for StaticFunction {
     }
 }
 
-impl StaticFunction {
+impl<S: XmlDS + SourceSpecificFunctions> StaticFunction<S> {
     pub(crate) fn new(
-        func: StaticFunctionType,
+        func: StaticFunctionType<S>,
         name: Name,
         signature: function::Signature,
         function_kind: Option<FunctionKind>,
@@ -193,15 +197,15 @@ impl StaticFunction {
 
     pub(crate) fn invoke(
         &self,
-        context: &DynamicContext,
-        interpreter: &mut interpreter::Interpreter,
-        arguments: Vec<sequence::Sequence>,
-        closure_values: &[stack::Value],
-    ) -> error::Result<sequence::Sequence> {
+        context: &DynamicContext<S>,
+        interpreter: &mut interpreter::Interpreter<S>,
+        arguments: Vec<sequence::Sequence<S::Node>>,
+        closure_values: &[stack::Value<S::Node>],
+    ) -> error::Result<sequence::Sequence<S::Node>> {
         if let Some(function_rule) = &self.function_rule {
             match function_rule {
                 FunctionRule::ItemFirst | FunctionRule::PositionFirst | FunctionRule::SizeFirst => {
-                    let mut new_arguments: Vec<sequence::Sequence> =
+                    let mut new_arguments: Vec<sequence::Sequence<S::Node>> =
                         vec![closure_values[0].clone().try_into()?];
                     new_arguments.extend(arguments);
                     (self.func)(context, interpreter, &new_arguments)
@@ -213,7 +217,7 @@ impl StaticFunction {
                 }
                 FunctionRule::ItemLastOptional | FunctionRule::AnonymousClosure => {
                     let mut new_arguments = arguments;
-                    let value: sequence::Sequence =
+                    let value: sequence::Sequence<S::Node> =
                         if !closure_values.is_empty() && !closure_values[0].is_absent() {
                             closure_values[0].clone().try_into()?
                         } else {
@@ -256,7 +260,9 @@ impl StaticFunction {
     }
 }
 
-fn into_sequences(values: &[stack::Value]) -> error::Result<Vec<sequence::Sequence>> {
+fn into_sequences<N: XmlNode>(
+    values: &[stack::Value<N>],
+) -> error::Result<Vec<sequence::Sequence<N>>> {
     values
         .iter()
         .map(|v| match v {
@@ -267,21 +273,32 @@ fn into_sequences(values: &[stack::Value]) -> error::Result<Vec<sequence::Sequen
 }
 
 #[derive(Debug)]
-pub struct StaticFunctions {
+pub struct StaticFunctions<S: XmlDS + SourceSpecificFunctions> {
     by_name: HashMap<(Name, u8), function::StaticFunctionId>,
     by_internal_name: HashMap<(Name, u8), function::StaticFunctionId>,
-    by_index: Vec<StaticFunction>,
+    by_index: Vec<StaticFunction<S>>,
 }
 
-impl StaticFunctions {
+pub trait SourceSpecificFunctions: XmlDS {
+    fn register_custom_functions() -> Vec<StaticFunctionDescription<Self>>;
+}
+
+impl<T: xee_datasource::NoCustomXpathFn> SourceSpecificFunctions for T {
+    #[inline]
+    fn register_custom_functions() -> Vec<StaticFunctionDescription<Self>> {
+        vec![]
+    }
+}
+
+impl<S: XmlDS + SourceSpecificFunctions> StaticFunctions<S> {
     pub(crate) fn new() -> Self {
         let mut by_name = HashMap::new();
         let mut by_internal_name = HashMap::new();
-        let descriptions = static_function_descriptions();
-        let mut by_index = Vec::new();
-        for description in descriptions {
-            by_index.extend(description.functions());
-        }
+        let descriptions = static_function_descriptions::<S>();
+        let by_index = descriptions
+            .into_iter()
+            .flat_map(|desc| desc.functions())
+            .collect::<Vec<_>>();
 
         for (i, static_function) in by_index.iter().enumerate() {
             let map = match static_function.function_rule {
@@ -314,7 +331,10 @@ impl StaticFunctions {
         self.by_internal_name.get(&(name.clone(), arity)).copied()
     }
 
-    pub fn get_by_index(&self, static_function_id: function::StaticFunctionId) -> &StaticFunction {
+    pub fn get_by_index(
+        &self,
+        static_function_id: function::StaticFunctionId,
+    ) -> &StaticFunction<S> {
         &self.by_index[static_function_id.0]
     }
 }

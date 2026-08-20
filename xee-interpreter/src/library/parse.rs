@@ -2,16 +2,17 @@
 
 use xee_xpath_macros::xpath_fn;
 
+use crate::function::XmlDS;
 use crate::{context, error, function, interpreter::Interpreter, sequence, wrap_xpath_fn};
 
 use super::StaticFunctionDescription;
 
 #[xpath_fn("fn:parse-xml($arg as xs:string?) as document-node(element(*))?")]
-fn parse_xml(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
+fn parse_xml<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
     arg: Option<&str>,
-) -> error::Result<Option<xot::Node>> {
+) -> error::Result<Option<S::Node>> {
     if let Some(arg) = arg {
         let documents = context.documents();
         let handle = documents
@@ -29,11 +30,11 @@ fn parse_xml(
 }
 
 #[xpath_fn("fn:parse-xml-fragment($arg as xs:string?) as document-node()?")]
-fn parse_xml_fragment(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
+fn parse_xml_fragment<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
     arg: Option<&str>,
-) -> error::Result<Option<xot::Node>> {
+) -> error::Result<Option<S::Node>> {
     if let Some(arg) = arg {
         let documents = context.documents();
         let handle = documents
@@ -51,10 +52,10 @@ fn parse_xml_fragment(
 }
 
 #[xpath_fn("fn:serialize($arg as item()*) as xs:string")]
-fn serialize1(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
-    arg: &sequence::Sequence,
+fn serialize1<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
+    arg: &sequence::Sequence<S::Node>,
 ) -> error::Result<String> {
     let map = function::Map::new(vec![])?;
     let serialization_parameters = sequence::SerializationParameters::from_map(
@@ -66,18 +67,20 @@ fn serialize1(
 }
 
 #[xpath_fn("fn:serialize($arg as item()*, $params as item()?) as xs:string")]
-fn serialize2(
-    context: &context::DynamicContext,
-    interpreter: &mut Interpreter,
-    arg: &sequence::Sequence,
-    params: Option<sequence::Item>,
+fn serialize2<S: XmlDS>(
+    context: &context::DynamicContext<S>,
+    interpreter: &mut Interpreter<S>,
+    arg: &sequence::Sequence<S::Node>,
+    params: Option<sequence::Item<S::Node>>,
 ) -> error::Result<String> {
     let map = if let Some(params) = params {
         if let sequence::Item::Function(function::Function::Map(map)) = params {
             map.clone()
         } else {
             // TODO: handle element(output::serialization-parameters)
-            return Err(error::Error::XPTY0004);
+            return Err(error::Error::XPTY0004(
+                "fn:serialize called with a $params argument that is not a map",
+            ));
         }
     } else {
         function::Map::new(vec![])?
@@ -90,11 +93,11 @@ fn serialize2(
     arg.serialize(serialization_parameters, interpreter.xot_mut())
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(parse_xml),
-        wrap_xpath_fn!(parse_xml_fragment),
-        wrap_xpath_fn!(serialize1),
-        wrap_xpath_fn!(serialize2),
+        wrap_xpath_fn!(parse_xml, S),
+        wrap_xpath_fn!(parse_xml_fragment, S),
+        wrap_xpath_fn!(serialize1, S),
+        wrap_xpath_fn!(serialize2, S),
     ]
 }

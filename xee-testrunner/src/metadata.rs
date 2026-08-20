@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use xee_xpath::{context, Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::catalog::LoadContext;
 
@@ -34,7 +35,7 @@ impl ContextLoadable<LoadContext> for Metadata {
     fn load_with_context(
         queries: &Queries,
         _context: &LoadContext,
-    ) -> Result<impl Query<Metadata>> {
+    ) -> Result<impl Query<Metadata, Xot>> {
         let description_query = queries.option("description/string()", convert_string)?;
         let by_query = queries.one("@by/string()", convert_string)?;
         let on_query = queries.one("@on/string()", convert_string)?;

@@ -1,6 +1,6 @@
-use std::sync::OnceLock;
+use xee_datasource::xmlname::RefName;
+use xee_datasource::{Element, XmlAttribAccess, XmlDS};
 use xee_name::{Namespaces, VariableNames};
-use xot::Node;
 
 use xee_xpath_ast::ast as xpath_ast;
 
@@ -8,14 +8,14 @@ use crate::ast_core::{self as ast};
 use crate::attributes::Attributes;
 use crate::combinator::{one, NodeParser};
 use crate::content::Content;
-use crate::element::{by_element, children, instruction, sequence_constructor, ContentParseLock};
+use crate::element::{by_element, children, instruction, sequence_constructor};
 use crate::error::ElementError as Error;
 use crate::state::State;
 
 type Result<V> = std::result::Result<V, Error>;
 
-pub(crate) trait InstructionParser: Sized {
-    fn validate(&self, _node: Node, _state: &State) -> Result<()> {
+pub(crate) trait InstructionParser<S: XmlDS>: Sized {
+    fn validate(&self, _node: S::Node, _state: &State<S>) -> Result<()> {
         Ok(())
     }
 
@@ -23,12 +23,12 @@ pub(crate) trait InstructionParser: Sized {
         false
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self>;
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self>;
 
-    fn parse_and_validate(attributes: &Attributes) -> Result<Self> {
+    fn parse_and_validate(attributes: &Attributes<S>) -> Result<Self> {
         let content = &attributes.content;
         if Self::should_be_empty() {
-            if let Some(child) = content.state.xot.first_child(content.node) {
+            if let Some(child) = content.state.source.first_child(content.node) {
                 return Err(Error::Unexpected {
                     span: content.state.span(child).ok_or(Error::Internal)?,
                 });
@@ -44,44 +44,52 @@ pub(crate) trait InstructionParser: Sized {
     }
 }
 
-pub(crate) trait SequenceConstructorParser:
-    InstructionParser + Into<ast::SequenceConstructorItem>
+pub(crate) trait SequenceConstructorParser<S: XmlDS>:
+    InstructionParser<S> + Into<ast::SequenceConstructorItem>
 {
     fn parse_sequence_constructor_item(
-        attributes: &Attributes,
+        attributes: &Attributes<S>,
     ) -> Result<ast::SequenceConstructorItem> {
         let item = Self::parse_and_validate(attributes)?;
         Ok(item.into())
     }
 }
 
-impl<T> SequenceConstructorParser for T where
-    T: InstructionParser + Into<ast::SequenceConstructorItem>
+impl<T, S: XmlDS> SequenceConstructorParser<S> for T where
+    T: InstructionParser<S> + Into<ast::SequenceConstructorItem>
 {
 }
 
-pub(crate) trait DeclarationParser: InstructionParser + Into<ast::Declaration> {
-    fn parse_declaration(attributes: &Attributes) -> Result<ast::Declaration> {
+pub(crate) trait DeclarationParser<S: XmlDS>:
+    InstructionParser<S> + Into<ast::Declaration>
+{
+    fn parse_declaration(attributes: &Attributes<S>) -> Result<ast::Declaration> {
         let item = Self::parse_and_validate(attributes)?;
         Ok(item.into())
     }
 }
 
-impl<T> DeclarationParser for T where T: InstructionParser + Into<ast::Declaration> {}
+impl<T, S: XmlDS> DeclarationParser<S> for T where T: InstructionParser<S> + Into<ast::Declaration> {}
 
-pub(crate) trait OverrideContentParser:
-    InstructionParser + Into<ast::OverrideContent>
+pub(crate) trait OverrideContentParser<S: XmlDS>:
+    InstructionParser<S> + Into<ast::OverrideContent>
 {
-    fn parse_override_content(attributes: &Attributes) -> Result<ast::OverrideContent> {
+    fn parse_override_content(attributes: &Attributes<S>) -> Result<ast::OverrideContent> {
         let item = Self::parse_and_validate(attributes)?;
         Ok(item.into())
     }
 }
 
-impl<T> OverrideContentParser for T where T: InstructionParser + Into<ast::OverrideContent> {}
+impl<T, S: XmlDS> OverrideContentParser<S> for T where
+    T: InstructionParser<S> + Into<ast::OverrideContent>
+{
+}
 
-impl InstructionParser for ast::SequenceConstructorItem {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<ast::SequenceConstructorItem> {
+impl<S: XmlDS> InstructionParser<S> for ast::SequenceConstructorItem {
+    fn parse(
+        content: &Content<S>,
+        attributes: &Attributes<S>,
+    ) -> Result<ast::SequenceConstructorItem> {
         let state = content.state;
         let name = state
             .names
@@ -90,7 +98,7 @@ impl InstructionParser for ast::SequenceConstructorItem {
         if let Some(name) = name {
             name.parse(attributes)
         } else {
-            let ns = state.xot.namespace_for_name(attributes.element.name());
+            let ns = state.source.namespace_for_name(attributes.element.name());
             if ns == state.names.xsl_ns {
                 // we have an unknown xsl instruction, fail with error
                 Err(Error::Unexpected {
@@ -104,8 +112,8 @@ impl InstructionParser for ast::SequenceConstructorItem {
     }
 }
 
-impl InstructionParser for ast::Declaration {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<ast::Declaration> {
+impl<S: XmlDS> InstructionParser<S> for ast::Declaration {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<ast::Declaration> {
         let name = content
             .state
             .names
@@ -121,11 +129,11 @@ impl InstructionParser for ast::Declaration {
     }
 }
 
-impl InstructionParser for ast::ElementNode {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<ast::ElementNode> {
+impl<S: XmlDS> InstructionParser<S> for ast::ElementNode {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<ast::ElementNode> {
         let mut element_attributes = Vec::new();
-        for key in content.state.xot.attributes(content.node).keys() {
-            let name = content.state.xot.name_ref(key, content.node)?;
+        for key in content.state.source.attributes(content.node).keys() {
+            let name = content.state.source.name_ref(key, content.node)?;
             // if any name is in the xsl namespace, we skip it
             if name.namespace_id() == content.state.names.xsl_ns {
                 continue;
@@ -136,7 +144,7 @@ impl InstructionParser for ast::ElementNode {
 
         let name = content
             .state
-            .xot
+            .source
             .name_ref(attributes.element.name(), content.node)?;
         Ok(ast::ElementNode {
             name: name.to_owned(),
@@ -147,12 +155,12 @@ impl InstructionParser for ast::ElementNode {
     }
 }
 
-impl InstructionParser for ast::Accept {
+impl<S: XmlDS> InstructionParser<S> for ast::Accept {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Accept {
             component: attributes.required(names.component, attributes.component())?,
@@ -165,13 +173,13 @@ impl InstructionParser for ast::Accept {
     }
 }
 
-static ACCUMULATOR_CONTENT: ContentParseLock<Vec<ast::AccumulatorRule>> = OnceLock::new();
-
-impl InstructionParser for ast::Accumulator {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Accumulator {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse = ACCUMULATOR_CONTENT
+        let parse = content
+            .lazy_init
+            .accumulator_content
             .get_or_init(|| children(instruction(names.xsl_accumulator_rule).many()));
 
         Ok(ast::Accumulator {
@@ -187,8 +195,8 @@ impl InstructionParser for ast::Accumulator {
     }
 }
 
-impl InstructionParser for ast::AccumulatorRule {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::AccumulatorRule {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         Ok(ast::AccumulatorRule {
@@ -203,7 +211,7 @@ impl InstructionParser for ast::AccumulatorRule {
     }
 }
 
-type AnalyzeStringContent = (
+pub(crate) type AnalyzeStringContent = (
     (
         Option<ast::MatchingSubstring>,
         Option<ast::NonMatchingSubstring>,
@@ -211,10 +219,8 @@ type AnalyzeStringContent = (
     Vec<ast::Fallback>,
 );
 
-static ANALYZE_STRING: ContentParseLock<AnalyzeStringContent> = OnceLock::new();
-
-impl InstructionParser for ast::AnalyzeString {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::AnalyzeString {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         let span = content.span()?;
 
@@ -224,7 +230,7 @@ impl InstructionParser for ast::AnalyzeString {
         let flags =
             attributes.optional(names.flags, attributes.value_template(attributes.string()))?;
 
-        let parse = ANALYZE_STRING.get_or_init(|| {
+        let parse = content.lazy_init.analyze_string.get_or_init(|| {
             children(
                 instruction(names.xsl_matching_substring)
                     .option()
@@ -249,11 +255,11 @@ impl InstructionParser for ast::AnalyzeString {
     }
 }
 
-static APPLY_IMPORTS_CONTENT: ContentParseLock<Vec<ast::WithParam>> = OnceLock::new();
-
-impl InstructionParser for ast::ApplyImports {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
-        let parse = APPLY_IMPORTS_CONTENT
+impl<S: XmlDS> InstructionParser<S> for ast::ApplyImports {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
+        let parse = content
+            .lazy_init
+            .apply_imports_content
             .get_or_init(|| children(instruction(content.state.names.xsl_with_param).many()));
         Ok(ast::ApplyImports {
             span: content.span()?,
@@ -263,13 +269,11 @@ impl InstructionParser for ast::ApplyImports {
     }
 }
 
-static APPLY_TEMPLATES_CONTENT: ContentParseLock<Vec<ast::ApplyTemplatesContent>> = OnceLock::new();
-
-impl InstructionParser for ast::ApplyTemplates {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::ApplyTemplates {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse = APPLY_TEMPLATES_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.apply_templates_content.get_or_init(|| {
             children(
                 instruction(names.xsl_with_param)
                     .map(ast::ApplyTemplatesContent::WithParam)
@@ -313,8 +317,8 @@ impl InstructionParser for ast::ApplyTemplates {
     }
 }
 
-impl InstructionParser for ast::Assert {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Assert {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Assert {
             test: attributes.required(names.test, attributes.xpath())?,
@@ -331,8 +335,8 @@ impl InstructionParser for ast::Assert {
     }
 }
 
-impl InstructionParser for ast::Attribute {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Attribute {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Attribute {
             name: attributes.required(names.name, attributes.value_template(attributes.qname()))?,
@@ -353,14 +357,14 @@ impl InstructionParser for ast::Attribute {
     }
 }
 
-static ATTRIBUTE_SET_CONTENT: ContentParseLock<Vec<ast::Attribute>> = OnceLock::new();
-
-impl InstructionParser for ast::AttributeSet {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::AttributeSet {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse =
-            ATTRIBUTE_SET_CONTENT.get_or_init(|| children(instruction(names.xsl_attribute).many()));
+        let parse = content
+            .lazy_init
+            .attribute_set_content
+            .get_or_init(|| children(instruction(names.xsl_attribute).many()));
 
         Ok(ast::AttributeSet {
             name: attributes.required(names.name, attributes.eqname())?,
@@ -377,8 +381,8 @@ impl InstructionParser for ast::AttributeSet {
     }
 }
 
-impl InstructionParser for ast::Break {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Break {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::Break {
             select: attributes.optional(content.state.names.select, attributes.xpath())?,
 
@@ -389,12 +393,12 @@ impl InstructionParser for ast::Break {
     }
 }
 
-static CALL_TEMPLATE_CONTENT: ContentParseLock<Vec<ast::WithParam>> = OnceLock::new();
-
-impl InstructionParser for ast::CallTemplate {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::CallTemplate {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
-        let parse = CALL_TEMPLATE_CONTENT
+        let parse = content
+            .lazy_init
+            .call_template_content
             .get_or_init(|| children(instruction(names.xsl_with_param).many()));
 
         Ok(ast::CallTemplate {
@@ -407,8 +411,8 @@ impl InstructionParser for ast::CallTemplate {
     }
 }
 
-impl InstructionParser for ast::Catch {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Catch {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Catch {
             errors: attributes.optional(names.errors, attributes.tokens())?,
@@ -421,13 +425,13 @@ impl InstructionParser for ast::Catch {
     }
 }
 
-static CHARACTER_MAP_CONTENT: ContentParseLock<Vec<ast::OutputCharacter>> = OnceLock::new();
-
-impl InstructionParser for ast::CharacterMap {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::CharacterMap {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse = CHARACTER_MAP_CONTENT
+        let parse = content
+            .lazy_init
+            .character_map_content
             .get_or_init(|| children(instruction(names.xsl_output_character).many()));
 
         Ok(ast::CharacterMap {
@@ -442,14 +446,12 @@ impl InstructionParser for ast::CharacterMap {
     }
 }
 
-static CHOOSE_CONTENT: ContentParseLock<(Vec<ast::When>, Option<ast::Otherwise>)> = OnceLock::new();
-
-impl InstructionParser for ast::Choose {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Choose {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         let span = content.span()?;
         let names = &content.state.names;
 
-        let parse = CHOOSE_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.choose_content.get_or_init(|| {
             children(
                 instruction(names.xsl_when)
                     .one_or_more()
@@ -467,8 +469,8 @@ impl InstructionParser for ast::Choose {
     }
 }
 
-impl InstructionParser for ast::Comment {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Comment {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::Comment {
             select: attributes.optional(content.state.names.select, attributes.xpath())?,
 
@@ -479,12 +481,12 @@ impl InstructionParser for ast::Comment {
     }
 }
 
-impl InstructionParser for ast::ContextItem {
+impl<S: XmlDS> InstructionParser<S> for ast::ContextItem {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::ContextItem {
             as_: attributes.optional(names.as_, attributes.item_type())?,
@@ -495,8 +497,8 @@ impl InstructionParser for ast::ContextItem {
     }
 }
 
-impl InstructionParser for ast::Copy {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Copy {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Copy {
             select: attributes.optional(names.select, attributes.xpath())?,
@@ -517,12 +519,12 @@ impl InstructionParser for ast::Copy {
     }
 }
 
-impl InstructionParser for ast::CopyOf {
+impl<S: XmlDS> InstructionParser<S> for ast::CopyOf {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         Ok(ast::CopyOf {
@@ -537,12 +539,12 @@ impl InstructionParser for ast::CopyOf {
     }
 }
 
-impl InstructionParser for ast::DecimalFormat {
+impl<S: XmlDS> InstructionParser<S> for ast::DecimalFormat {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::DecimalFormat {
             name: attributes.optional(names.name, attributes.eqname())?,
@@ -563,8 +565,8 @@ impl InstructionParser for ast::DecimalFormat {
     }
 }
 
-impl InstructionParser for ast::Document {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Document {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Document {
             validation: attributes.optional(names.validation, attributes.validation())?,
@@ -577,8 +579,8 @@ impl InstructionParser for ast::Document {
     }
 }
 
-impl InstructionParser for ast::Element {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Element {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Element {
             name: attributes.required(names.name, attributes.value_template(attributes.qname()))?,
@@ -597,12 +599,10 @@ impl InstructionParser for ast::Element {
     }
 }
 
-static EVALUATE_CONTENT: ContentParseLock<Vec<ast::EvaluateContent>> = OnceLock::new();
-
-impl InstructionParser for ast::Evaluate {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Evaluate {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
-        let parse = EVALUATE_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.evaluate_content.get_or_init(|| {
             children(
                 instruction(names.xsl_with_param)
                     .map(ast::EvaluateContent::WithParam)
@@ -631,12 +631,12 @@ impl InstructionParser for ast::Evaluate {
     }
 }
 
-impl InstructionParser for ast::Expose {
+impl<S: XmlDS> InstructionParser<S> for ast::Expose {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Expose {
             component: attributes.required(names.component, attributes.component())?,
@@ -649,8 +649,8 @@ impl InstructionParser for ast::Expose {
     }
 }
 
-impl InstructionParser for ast::Fallback {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Fallback {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::Fallback {
             span: content.span()?,
 
@@ -659,16 +659,13 @@ impl InstructionParser for ast::Fallback {
     }
 }
 
-static FOR_EACH_CONTENT: ContentParseLock<(Vec<ast::Sort>, ast::SequenceConstructor)> =
-    OnceLock::new();
-
-impl InstructionParser for ast::ForEach {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::ForEach {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         let select = attributes.required(names.select, attributes.xpath())?;
         let span = content.span()?;
 
-        let parse = FOR_EACH_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.for_each_content.get_or_init(|| {
             children(
                 instruction(names.xsl_sort)
                     .many()
@@ -689,11 +686,8 @@ impl InstructionParser for ast::ForEach {
     }
 }
 
-static FOR_EACH_GROUP_CONTENT: ContentParseLock<(Vec<ast::Sort>, ast::SequenceConstructor)> =
-    OnceLock::new();
-
-impl InstructionParser for ast::ForEachGroup {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::ForEachGroup {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         let select = attributes.required(names.select, attributes.xpath())?;
         let group_by = attributes.optional(names.group_by, attributes.xpath())?;
@@ -707,7 +701,7 @@ impl InstructionParser for ast::ForEachGroup {
             attributes.optional(names.collation, attributes.value_template(attributes.uri()))?;
         let span = content.span()?;
 
-        let parse = FOR_EACH_GROUP_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.for_each_group_content.get_or_init(|| {
             children(
                 instruction(names.xsl_sort)
                     .many()
@@ -734,14 +728,12 @@ impl InstructionParser for ast::ForEachGroup {
     }
 }
 
-static FORK_CONTENT: ContentParseLock<(Vec<ast::Fallback>, ast::ForkContent)> = OnceLock::new();
-
-impl InstructionParser for ast::Fork {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Fork {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         let span = content.span()?;
 
-        let parse = FORK_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.fork_content.get_or_init(|| {
             let sequence_fallbacks = (instruction(names.xsl_sequence)
                 .then(instruction(names.xsl_fallback).many()))
             .many();
@@ -771,11 +763,8 @@ impl InstructionParser for ast::Fork {
     }
 }
 
-static FUNCTION_CONTENT: ContentParseLock<(Vec<ast::Param>, ast::SequenceConstructor)> =
-    OnceLock::new();
-
-impl InstructionParser for ast::Function {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Function {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         let name = attributes.required(names.name, attributes.eqname())?;
         let as_ = attributes.optional(names.as_, attributes.sequence_type())?;
@@ -791,7 +780,7 @@ impl InstructionParser for ast::Function {
 
         let span = content.span()?;
 
-        let parse = FUNCTION_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.function_content.get_or_init(|| {
             children(
                 instruction(names.xsl_param)
                     .many()
@@ -819,12 +808,12 @@ impl InstructionParser for ast::Function {
     }
 }
 
-impl InstructionParser for ast::GlobalContextItem {
+impl<S: XmlDS> InstructionParser<S> for ast::GlobalContextItem {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::GlobalContextItem {
             as_: attributes.optional(names.as_, attributes.item_type())?,
@@ -835,8 +824,8 @@ impl InstructionParser for ast::GlobalContextItem {
     }
 }
 
-impl InstructionParser for ast::If {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::If {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::If {
             test: attributes.required(names.test, attributes.xpath())?,
@@ -848,12 +837,12 @@ impl InstructionParser for ast::If {
     }
 }
 
-impl InstructionParser for ast::Import {
+impl<S: XmlDS> InstructionParser<S> for ast::Import {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Import {
             href: attributes.required(names.href, attributes.uri())?,
@@ -863,8 +852,8 @@ impl InstructionParser for ast::Import {
     }
 }
 
-impl InstructionParser for ast::ImportSchema {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::ImportSchema {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         Ok(ast::ImportSchema {
@@ -879,12 +868,12 @@ impl InstructionParser for ast::ImportSchema {
     }
 }
 
-impl InstructionParser for ast::Include {
+impl<S: XmlDS> InstructionParser<S> for ast::Include {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Include {
             href: attributes.required(names.href, attributes.uri())?,
@@ -894,21 +883,19 @@ impl InstructionParser for ast::Include {
     }
 }
 
-type IterateContent = (
+pub(crate) type IterateContent = (
     (Vec<ast::Param>, Option<ast::OnCompletion>),
     ast::SequenceConstructor,
 );
 
-static ITERATE_CONTENT: ContentParseLock<IterateContent> = OnceLock::new();
-
-impl InstructionParser for ast::Iterate {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Iterate {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         let select = attributes.required(names.select, attributes.xpath())?;
 
         let span = content.span()?;
 
-        let parse = ITERATE_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.iterate_content.get_or_init(|| {
             children(
                 instruction(names.xsl_param)
                     .many()
@@ -931,8 +918,8 @@ impl InstructionParser for ast::Iterate {
     }
 }
 
-impl InstructionParser for ast::Key {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Key {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         Ok(ast::Key {
@@ -949,8 +936,8 @@ impl InstructionParser for ast::Key {
     }
 }
 
-impl InstructionParser for ast::Map {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Map {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::Map {
             span: content.span()?,
 
@@ -959,8 +946,8 @@ impl InstructionParser for ast::Map {
     }
 }
 
-impl InstructionParser for ast::MapEntry {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::MapEntry {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::MapEntry {
             key: attributes.required(names.key, attributes.xpath())?,
@@ -973,8 +960,8 @@ impl InstructionParser for ast::MapEntry {
     }
 }
 
-impl InstructionParser for ast::MatchingSubstring {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::MatchingSubstring {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::MatchingSubstring {
             span: content.span()?,
 
@@ -983,18 +970,16 @@ impl InstructionParser for ast::MatchingSubstring {
     }
 }
 
-type MergeContent = (
+pub(crate) type MergeContent = (
     Vec<ast::MergeSource>,
     (ast::MergeAction, Vec<ast::Fallback>),
 );
 
-static MERGE_CONTENT: ContentParseLock<MergeContent> = OnceLock::new();
-
-impl InstructionParser for ast::Merge {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Merge {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse = MERGE_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.merge_content.get_or_init(|| {
             children(instruction(names.xsl_merge_source).one_or_more().then(
                 instruction(names.xsl_merge_action).then(instruction(names.xsl_fallback).many()),
             ))
@@ -1012,8 +997,8 @@ impl InstructionParser for ast::Merge {
     }
 }
 
-impl InstructionParser for ast::MergeAction {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::MergeAction {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::MergeAction {
             span: content.span()?,
 
@@ -1022,8 +1007,8 @@ impl InstructionParser for ast::MergeAction {
     }
 }
 
-impl InstructionParser for ast::MergeKey {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::MergeKey {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::MergeKey {
             select: attributes.optional(names.select, attributes.xpath())?,
@@ -1049,13 +1034,13 @@ impl InstructionParser for ast::MergeKey {
     }
 }
 
-static MERGE_SOURCE_CONTENT: ContentParseLock<Vec<ast::MergeKey>> = OnceLock::new();
-
-impl InstructionParser for ast::MergeSource {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::MergeSource {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse = MERGE_SOURCE_CONTENT
+        let parse = content
+            .lazy_init
+            .merge_source_content
             .get_or_init(|| children(instruction(names.xsl_merge_key).one_or_more()));
 
         Ok(ast::MergeSource {
@@ -1076,8 +1061,8 @@ impl InstructionParser for ast::MergeSource {
     }
 }
 
-impl InstructionParser for ast::Message {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Message {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Message {
             select: attributes.optional(names.select, attributes.xpath())?,
@@ -1097,12 +1082,12 @@ impl InstructionParser for ast::Message {
     }
 }
 
-impl InstructionParser for ast::Mode {
+impl<S: XmlDS> InstructionParser<S> for ast::Mode {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Mode {
             name: attributes.optional(names.name, attributes.eqname())?,
@@ -1123,8 +1108,8 @@ impl InstructionParser for ast::Mode {
     }
 }
 
-impl InstructionParser for ast::Namespace {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Namespace {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Namespace {
             name: attributes
@@ -1138,12 +1123,12 @@ impl InstructionParser for ast::Namespace {
     }
 }
 
-impl InstructionParser for ast::NamespaceAlias {
+impl<S: XmlDS> InstructionParser<S> for ast::NamespaceAlias {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::NamespaceAlias {
             stylesheet_prefix: attributes
@@ -1156,11 +1141,11 @@ impl InstructionParser for ast::NamespaceAlias {
     }
 }
 
-static NEXT_ITERATION_CONTENT: ContentParseLock<Vec<ast::WithParam>> = OnceLock::new();
-
-impl InstructionParser for ast::NextIteration {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
-        let parse = NEXT_ITERATION_CONTENT
+impl<S: XmlDS> InstructionParser<S> for ast::NextIteration {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
+        let parse = content
+            .lazy_init
+            .next_iteration_content
             .get_or_init(|| children(instruction(content.state.names.xsl_with_param).many()));
 
         Ok(ast::NextIteration {
@@ -1171,13 +1156,11 @@ impl InstructionParser for ast::NextIteration {
     }
 }
 
-static NEXT_MATCH_CONTENT: ContentParseLock<Vec<ast::NextMatchContent>> = OnceLock::new();
-
-impl InstructionParser for ast::NextMatch {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::NextMatch {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let parse = NEXT_MATCH_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.next_match_content.get_or_init(|| {
             children(
                 instruction(names.xsl_with_param)
                     .map(ast::NextMatchContent::WithParam)
@@ -1194,8 +1177,8 @@ impl InstructionParser for ast::NextMatch {
     }
 }
 
-impl InstructionParser for ast::NonMatchingSubstring {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::NonMatchingSubstring {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::NonMatchingSubstring {
             span: content.span()?,
 
@@ -1204,12 +1187,12 @@ impl InstructionParser for ast::NonMatchingSubstring {
     }
 }
 
-impl InstructionParser for ast::Number {
+impl<S: XmlDS> InstructionParser<S> for ast::Number {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         Ok(ast::Number {
@@ -1248,8 +1231,8 @@ impl InstructionParser for ast::Number {
     }
 }
 
-impl InstructionParser for ast::OnCompletion {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::OnCompletion {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::OnCompletion {
             select: attributes.optional(content.state.names.select, attributes.xpath())?,
 
@@ -1260,8 +1243,8 @@ impl InstructionParser for ast::OnCompletion {
     }
 }
 
-impl InstructionParser for ast::OnEmpty {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::OnEmpty {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::OnEmpty {
             select: attributes.optional(content.state.names.select, attributes.xpath())?,
 
@@ -1272,8 +1255,8 @@ impl InstructionParser for ast::OnEmpty {
     }
 }
 
-impl InstructionParser for ast::OnNonEmpty {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::OnNonEmpty {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::OnNonEmpty {
             select: attributes.optional(content.state.names.select, attributes.xpath())?,
 
@@ -1284,8 +1267,8 @@ impl InstructionParser for ast::OnNonEmpty {
     }
 }
 
-impl InstructionParser for ast::Otherwise {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Otherwise {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::Otherwise {
             span: content.span()?,
 
@@ -1294,12 +1277,12 @@ impl InstructionParser for ast::Otherwise {
     }
 }
 
-impl InstructionParser for ast::Output {
+impl<S: XmlDS> InstructionParser<S> for ast::Output {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Output {
             name: attributes.optional(names.name, attributes.eqname())?,
@@ -1347,12 +1330,12 @@ impl InstructionParser for ast::Output {
     }
 }
 
-impl InstructionParser for ast::OutputCharacter {
+impl<S: XmlDS> InstructionParser<S> for ast::OutputCharacter {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::OutputCharacter {
             character: attributes.required(names.character, attributes.char())?,
@@ -1363,8 +1346,8 @@ impl InstructionParser for ast::OutputCharacter {
     }
 }
 
-impl InstructionParser for ast::OverrideContent {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<ast::OverrideContent> {
+impl<S: XmlDS> InstructionParser<S> for ast::OverrideContent {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<ast::OverrideContent> {
         let name = content
             .state
             .names
@@ -1380,11 +1363,9 @@ impl InstructionParser for ast::OverrideContent {
     }
 }
 
-static OVERRIDE_CONTENT: ContentParseLock<Vec<ast::OverrideContent>> = OnceLock::new();
-
-impl InstructionParser for ast::Override {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
-        let parse = OVERRIDE_CONTENT.get_or_init(|| {
+impl<S: XmlDS> InstructionParser<S> for ast::Override {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
+        let parse = content.lazy_init.override_content.get_or_init(|| {
             children(one(by_element(ast::OverrideContent::parse_override_content)).many())
         });
 
@@ -1398,8 +1379,8 @@ impl InstructionParser for ast::Override {
 
 // TODO: xsl:package
 
-impl InstructionParser for ast::Param {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Param {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Param {
             name: attributes.required(names.name, attributes.eqname())?,
@@ -1420,12 +1401,12 @@ impl InstructionParser for ast::Param {
 
 // TODO: xsl:preserve-space
 
-impl InstructionParser for ast::PreserveSpace {
+impl<S: XmlDS> InstructionParser<S> for ast::PreserveSpace {
     fn should_be_empty() -> bool {
         true
     }
 
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::PreserveSpace {
             elements: attributes.required(names.elements, attributes.tokens())?,
@@ -1435,8 +1416,8 @@ impl InstructionParser for ast::PreserveSpace {
     }
 }
 
-impl InstructionParser for ast::ProcessingInstruction {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::ProcessingInstruction {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::ProcessingInstruction {
             name: attributes
@@ -1452,8 +1433,8 @@ impl InstructionParser for ast::ProcessingInstruction {
 
 // TODO: xsl:result-document
 
-impl InstructionParser for ast::Sequence {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Sequence {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Sequence {
             select: attributes.optional(names.select, attributes.xpath())?,
@@ -1465,8 +1446,8 @@ impl InstructionParser for ast::Sequence {
     }
 }
 
-impl InstructionParser for ast::Sort {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Sort {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Sort {
             select: attributes.optional(names.select, attributes.xpath())?,
@@ -1496,8 +1477,8 @@ impl InstructionParser for ast::Sort {
     }
 }
 
-impl InstructionParser for ast::SourceDocument {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::SourceDocument {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         Ok(ast::SourceDocument {
@@ -1514,11 +1495,11 @@ impl InstructionParser for ast::SourceDocument {
     }
 }
 
-impl InstructionParser for ast::StripSpace {
+impl<S: XmlDS> InstructionParser<S> for ast::StripSpace {
     fn should_be_empty() -> bool {
         true
     }
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::StripSpace {
             elements: attributes.required(names.elements, attributes.tokens())?,
@@ -1528,15 +1509,13 @@ impl InstructionParser for ast::StripSpace {
     }
 }
 
-type TemplateContent = (
+pub(crate) type TemplateContent = (
     (Option<ast::ContextItem>, Vec<ast::Param>),
     ast::SequenceConstructor,
 );
 
-static TEMPLATE_CONTENT: ContentParseLock<TemplateContent> = OnceLock::new();
-
-impl InstructionParser for ast::Template {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Template {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         let match_ = attributes.optional(names.match_, attributes.pattern())?;
@@ -1547,7 +1526,7 @@ impl InstructionParser for ast::Template {
         let visibility =
             attributes.optional(names.visibility, attributes.visibility_with_abstract())?;
 
-        let parse = TEMPLATE_CONTENT.get_or_init(|| {
+        let parse = content.lazy_init.template_content.get_or_init(|| {
             children(
                 instruction(names.context_item)
                     .option()
@@ -1583,18 +1562,22 @@ impl InstructionParser for ast::Template {
     }
 }
 
-impl InstructionParser for ast::Text {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Text {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
-        let children = content.state.xot.children(content.node).collect::<Vec<_>>();
+        let children = content
+            .state
+            .source
+            .children(content.node)
+            .collect::<Vec<_>>();
         if children.len() > 1 {
             return Err(Error::Unexpected {
                 span: content.span()?,
             });
         }
         let text = if !children.is_empty() {
-            let text = content.state.xot.text_content_str(content.node);
+            let text = content.state.source.text_content_str(content.node);
             if let Some(text) = text {
                 text
             } else {
@@ -1620,8 +1603,8 @@ impl InstructionParser for ast::Text {
     }
 }
 
-impl InstructionParser for ast::Transform {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Transform {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::Transform {
             id: attributes.optional(names.id, attributes.id())?,
@@ -1643,8 +1626,8 @@ impl InstructionParser for ast::Transform {
 
 // TODO: xsl:use-package
 
-impl InstructionParser for ast::ValueOf {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::ValueOf {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::ValueOf {
             select: attributes.optional(names.select, attributes.xpath())?,
@@ -1662,8 +1645,8 @@ impl InstructionParser for ast::ValueOf {
     }
 }
 
-impl InstructionParser for ast::Variable {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::Variable {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
 
         // This is a rule somewhere, but not sure whether it's correct;
@@ -1688,7 +1671,7 @@ impl InstructionParser for ast::Variable {
         })
     }
 
-    fn validate(&self, node: Node, state: &State) -> Result<()> {
+    fn validate(&self, node: S::Node, state: &State<S>) -> Result<()> {
         if self.visibility == Some(ast::VisibilityWithAbstract::Abstract) && self.select.is_some() {
             return Err(state
                 .attribute_unexpected(
@@ -1702,8 +1685,8 @@ impl InstructionParser for ast::Variable {
     }
 }
 
-impl InstructionParser for ast::When {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::When {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::When {
             test: attributes.required(names.test, attributes.xpath())?,
@@ -1715,8 +1698,8 @@ impl InstructionParser for ast::When {
     }
 }
 
-impl InstructionParser for ast::WherePopulated {
-    fn parse(content: &Content, _attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::WherePopulated {
+    fn parse(content: &Content<S>, _attributes: &Attributes<S>) -> Result<Self> {
         Ok(ast::WherePopulated {
             span: content.span()?,
 
@@ -1725,8 +1708,8 @@ impl InstructionParser for ast::WherePopulated {
     }
 }
 
-impl InstructionParser for ast::WithParam {
-    fn parse(content: &Content, attributes: &Attributes) -> Result<Self> {
+impl<S: XmlDS> InstructionParser<S> for ast::WithParam {
+    fn parse(content: &Content<S>, attributes: &Attributes<S>) -> Result<Self> {
         let names = &content.state.names;
         Ok(ast::WithParam {
             name: attributes.required(names.name, attributes.eqname())?,

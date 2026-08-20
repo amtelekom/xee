@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::io::Stdout;
 use std::path::{Path, PathBuf};
+use xot::Xot;
 
 use xee_xpath::{context, Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable, ContextWithPath, PathLoadable};
@@ -89,7 +90,7 @@ impl<L: Language> ContextLoadable<LoadContext> for Catalog<L> {
     fn load_with_context(
         queries: &Queries,
         context: &LoadContext,
-    ) -> Result<impl Query<Catalog<L>>> {
+    ) -> Result<impl Query<Catalog<L>, Xot>> {
         let test_suite_query = queries.option("@test-suite/string()", convert_string)?;
         let version_query = queries.option("@version/string()", convert_string)?;
 

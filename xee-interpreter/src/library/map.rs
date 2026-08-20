@@ -2,6 +2,7 @@
 
 use ibig::IBig;
 
+use xee_datasource::XmlNode;
 use xee_schema_type::Xs;
 use xee_xpath_ast::ast;
 use xee_xpath_macros::xpath_fn;
@@ -10,15 +11,16 @@ use crate::atomic;
 use crate::error;
 use crate::function;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter;
 use crate::interpreter::Interpreter;
 use crate::sequence;
 use crate::wrap_xpath_fn;
 
 #[xpath_fn("map:merge($maps as map(*)*) as map(*)")]
-fn merge1(
-    maps: impl Iterator<Item = error::Result<function::Map>>,
-) -> error::Result<function::Map> {
+fn merge1<N: XmlNode>(
+    maps: impl Iterator<Item = error::Result<function::Map<N>>>,
+) -> error::Result<function::Map<N>> {
     merge(
         maps,
         MergeOptions {
@@ -28,11 +30,11 @@ fn merge1(
 }
 
 #[xpath_fn("map:merge($maps as map(*)*, $options as map(*)) as map(*)")]
-fn merge2(
-    interpreter: &interpreter::Interpreter,
-    maps: impl Iterator<Item = error::Result<function::Map>>,
-    options: function::Map,
-) -> error::Result<function::Map> {
+fn merge2<S: XmlDS>(
+    interpreter: &interpreter::Interpreter<S>,
+    maps: impl Iterator<Item = error::Result<function::Map<S::Node>>>,
+    options: function::Map<S::Node>,
+) -> error::Result<function::Map<S::Node>> {
     let options = MergeOptions::from_map(&options, interpreter)?;
     merge(maps, options)
 }
@@ -68,9 +70,9 @@ struct MergeOptions {
 }
 
 impl MergeOptions {
-    fn from_map(
-        map: &function::Map,
-        interpreter: &interpreter::Interpreter,
+    fn from_map<S: XmlDS>(
+        map: &function::Map<S::Node>,
+        interpreter: &interpreter::Interpreter<S>,
     ) -> error::Result<Self> {
         let key: atomic::Atomic = "duplicates".to_string().into();
         let duplicates = map.get(&key);
@@ -86,9 +88,9 @@ impl MergeOptions {
         }
     }
 
-    fn duplicates_value(
-        interpreter: &interpreter::Interpreter,
-        duplicates: &sequence::Sequence,
+    fn duplicates_value<S: XmlDS>(
+        interpreter: &interpreter::Interpreter<S>,
+        duplicates: &sequence::Sequence<S::Node>,
     ) -> error::Result<String> {
         // we want a string type
         let sequence_type = ast::SequenceType::Item(ast::Item {
@@ -103,7 +105,7 @@ impl MergeOptions {
             .sequence_type_matching_function_conversion(
                 &sequence_type,
                 runnable.static_context(),
-                interpreter.xot(),
+                interpreter.source(),
                 &|function| runnable.program().function_info(function).signature(),
             )?;
         // take the first value, which should be a string
@@ -113,10 +115,10 @@ impl MergeOptions {
     }
 }
 
-fn merge(
-    maps: impl Iterator<Item = error::Result<function::Map>>,
+fn merge<N: XmlNode>(
+    maps: impl Iterator<Item = error::Result<function::Map<N>>>,
     options: MergeOptions,
-) -> error::Result<function::Map> {
+) -> error::Result<function::Map<N>> {
     match options.duplicates {
         MergeDuplicates::Reject => function::Map::combine(maps, |_, _| Err(error::Error::FOJS0003)),
         MergeDuplicates::UseFirst => function::Map::combine(maps, |a, _| Ok(a)),
@@ -127,35 +129,38 @@ fn merge(
 }
 
 #[xpath_fn("map:size($map as map(*)) as xs:integer")]
-fn size(map: function::Map) -> IBig {
+fn size<N: XmlNode>(map: function::Map<N>) -> IBig {
     map.len().into()
 }
 
 #[xpath_fn("map:keys($map as map(*)) as xs:anyAtomicType*")]
-fn keys(map: function::Map) -> sequence::Sequence {
+fn keys<N: XmlNode>(map: function::Map<N>) -> sequence::Sequence<N> {
     map.keys().cloned().collect::<Vec<_>>().into()
 }
 
 #[xpath_fn("map:contains($map as map(*), $key as xs:anyAtomicType) as xs:boolean")]
-fn contains(map: function::Map, key: atomic::Atomic) -> bool {
+fn contains<N: XmlNode>(map: function::Map<N>, key: atomic::Atomic) -> bool {
     map.get(&key).is_some()
 }
 
 #[xpath_fn("map:get($map as map(*), $key as xs:anyAtomicType) as item()*")]
-fn get(map: function::Map, key: atomic::Atomic) -> sequence::Sequence {
+fn get<N: XmlNode>(map: function::Map<N>, key: atomic::Atomic) -> sequence::Sequence<N> {
     map.get(&key).cloned().unwrap_or_default()
 }
 
 #[xpath_fn("map:find($input as item()*, $key as xs:anyAtomicType) as array(*)")]
-fn find(input: &sequence::Sequence, key: atomic::Atomic) -> error::Result<function::Array> {
+fn find<N: XmlNode>(
+    input: &sequence::Sequence<N>,
+    key: atomic::Atomic,
+) -> error::Result<function::Array<N>> {
     Ok(find_helper(input, atomic::MapKey::new(key.clone()).unwrap())?.into())
 }
 
-fn find_helper(
-    input: &sequence::Sequence,
+fn find_helper<N: XmlNode>(
+    input: &sequence::Sequence<N>,
     key: atomic::MapKey,
-) -> error::Result<Vec<sequence::Sequence>> {
-    let mut result: Vec<sequence::Sequence> = Vec::new();
+) -> error::Result<Vec<sequence::Sequence<N>>> {
+    let mut result: Vec<sequence::Sequence<N>> = Vec::new();
     for item in input.iter() {
         if let sequence::Item::Function(function) = item {
             match function {
@@ -182,35 +187,35 @@ fn find_helper(
 }
 
 #[xpath_fn("map:put($map as map(*), $key as xs:anyAtomicType, $value as item()*) as map(*)")]
-fn put(
-    map: function::Map,
+fn put<N: XmlNode>(
+    map: function::Map<N>,
     key: atomic::Atomic,
-    value: &sequence::Sequence,
-) -> error::Result<function::Map> {
+    value: &sequence::Sequence<N>,
+) -> error::Result<function::Map<N>> {
     map.put(key, value)
 }
 
 #[xpath_fn("map:entry($key as xs:anyAtomicType, $value as item()*) as map(*)")]
-fn entry(key: atomic::Atomic, value: &sequence::Sequence) -> function::Map {
+fn entry<N: XmlNode>(key: atomic::Atomic, value: &sequence::Sequence<N>) -> function::Map<N> {
     function::Map::new(vec![(key, value.clone())]).unwrap()
 }
 
 #[xpath_fn("map:remove($map as map(*), $keys as xs:anyAtomicType*) as map(*)")]
-fn remove(
-    map: function::Map,
+fn remove<N: XmlNode>(
+    map: function::Map<N>,
     keys: impl Iterator<Item = error::Result<atomic::Atomic>>,
-) -> error::Result<function::Map> {
+) -> error::Result<function::Map<N>> {
     map.remove_keys(keys)
 }
 
 #[xpath_fn("map:for-each($map as map(*), $action as function(xs:anyAtomicType, item()*) as item()*) as item()*")]
-fn for_each(
-    interpreter: &mut Interpreter,
-    map: function::Map,
-    action: sequence::Item,
-) -> error::Result<sequence::Sequence> {
+fn for_each<S: XmlDS>(
+    interpreter: &mut Interpreter<S>,
+    map: function::Map<S::Node>,
+    action: sequence::Item<S::Node>,
+) -> error::Result<sequence::Sequence<S::Node>> {
     let function = action.to_function()?;
-    let mut result: Vec<sequence::Item> = Vec::with_capacity(map.len());
+    let mut result: Vec<sequence::Item<S::Node>> = Vec::with_capacity(map.len());
     for (key, value) in map.entries() {
         let r = interpreter
             .call_function_with_arguments(&function, &[key.clone().into(), value.clone()])?;
@@ -221,18 +226,18 @@ fn for_each(
     Ok(result.into())
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(merge1),
-        wrap_xpath_fn!(merge2),
-        wrap_xpath_fn!(find),
-        wrap_xpath_fn!(size),
-        wrap_xpath_fn!(keys),
-        wrap_xpath_fn!(contains),
-        wrap_xpath_fn!(get),
-        wrap_xpath_fn!(put),
-        wrap_xpath_fn!(entry),
-        wrap_xpath_fn!(remove),
-        wrap_xpath_fn!(for_each),
+        wrap_xpath_fn!(merge1, S),
+        wrap_xpath_fn!(merge2, S),
+        wrap_xpath_fn!(find, S),
+        wrap_xpath_fn!(size, S),
+        wrap_xpath_fn!(keys, S),
+        wrap_xpath_fn!(contains, S),
+        wrap_xpath_fn!(get, S),
+        wrap_xpath_fn!(put, S),
+        wrap_xpath_fn!(entry, S),
+        wrap_xpath_fn!(remove, S),
+        wrap_xpath_fn!(for_each, S),
     ]
 }

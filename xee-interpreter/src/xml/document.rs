@@ -2,7 +2,7 @@ use std::sync::atomic;
 
 use ahash::{HashMap, HashMapExt};
 use iri_string::types::{IriStr, IriString};
-use xot::Xot;
+use xee_datasource::XmlDS;
 
 use super::document_order::DocumentOrderAnnotations;
 use super::DocumentOrderAccess;
@@ -19,7 +19,7 @@ pub enum DocumentsError {
     /// An attempt as made to add a document with a URI that was already known.
     DuplicateUri(String),
     /// An error occurred loading the document XML (using the [`xot`] crate).
-    Parse(xot::ParseError),
+    Parse(xee_datasource::ParseError),
 }
 
 impl std::error::Error for DocumentsError {}
@@ -33,8 +33,8 @@ impl std::fmt::Display for DocumentsError {
     }
 }
 
-impl From<xot::ParseError> for DocumentsError {
-    fn from(e: xot::ParseError) -> Self {
+impl From<xee_datasource::ParseError> for DocumentsError {
+    fn from(e: xee_datasource::ParseError) -> Self {
         DocumentsError::Parse(e)
     }
 }
@@ -44,19 +44,19 @@ impl From<xot::ParseError> for DocumentsError {
 /// The document's elements are stored in a [`Xot`] arena and can be accessed
 /// through the root node.
 #[derive(Debug, Clone)]
-pub struct Document {
+pub struct Document<S: XmlDS> {
     pub(crate) uri: Option<IriString>,
-    root: xot::Node,
+    root: S::Node,
 }
 
-impl Document {
-    /// The document root node, a lightweight handle into a [`Xot`] arena.
-    pub fn root(&self) -> xot::Node {
+impl<S: XmlDS> Document<S> {
+    /// The document root node
+    pub fn root(&self) -> S::Node {
         self.root
     }
 
-    pub(crate) fn cleanup(&self, xot: &mut Xot) {
-        xot.remove(self.root).unwrap();
+    pub(crate) fn cleanup(&self, source: &mut S) {
+        source.remove(self.root).unwrap();
     }
 }
 
@@ -71,12 +71,12 @@ impl Document {
 /// The `fn:parse-xml` and `fn:parse-xml-fragment` functions can be used to
 /// create new documents from strings without URLs.
 #[derive(Debug, Clone)]
-pub struct Documents {
+pub struct Documents<S: XmlDS> {
     id: usize,
-    annotations: DocumentOrderAnnotations,
-    documents: Vec<Document>,
+    annotations: DocumentOrderAnnotations<S>,
+    documents: Vec<Document<S>>,
     by_uri: HashMap<IriString, DocumentHandle>,
-    uri_by_document_node: HashMap<xot::Node, IriString>,
+    uri_by_document_node: HashMap<S::Node, IriString>,
 }
 
 /// A handle to a document.
@@ -91,7 +91,7 @@ pub struct DocumentHandle {
     pub(crate) id: usize,
 }
 
-impl Documents {
+impl<S: XmlDS> Documents<S> {
     /// Create a new empty collection of documents.
     pub fn new() -> Self {
         Self {
@@ -104,9 +104,9 @@ impl Documents {
     }
 
     /// Clean up all documents.
-    pub fn cleanup(&mut self, xot: &mut Xot) {
+    pub fn cleanup(&mut self, source: &mut S) {
         for document in &self.documents {
-            document.cleanup(xot);
+            document.cleanup(source);
         }
         self.documents.clear();
         self.by_uri.clear();
@@ -115,21 +115,21 @@ impl Documents {
     /// Add a string as an XML document. It can be designated with a URI.
     pub fn add_string(
         &mut self,
-        xot: &mut Xot,
+        source: &mut S,
         uri: Option<&IriStr>,
         xml: &str,
     ) -> Result<DocumentHandle, DocumentsError> {
-        let root = xot.parse(xml)?;
+        let root = source.parse(xml)?;
         self.add_root(uri, root)
     }
 
     /// Add a string as an XML fragment.
     pub fn add_fragment_string(
         &mut self,
-        xot: &mut Xot,
+        source: &mut S,
         xml: &str,
     ) -> Result<DocumentHandle, DocumentsError> {
-        let root = xot.parse_fragment(xml)?;
+        let root = source.parse_fragment(xml)?;
         self.add_root(None, root)
     }
 
@@ -137,7 +137,7 @@ impl Documents {
     pub fn add_root(
         &mut self,
         uri: Option<&IriStr>,
-        root: xot::Node,
+        root: S::Node,
     ) -> Result<DocumentHandle, DocumentsError> {
         if let Some(uri) = uri {
             if self.by_uri.contains_key(uri) {
@@ -164,7 +164,7 @@ impl Documents {
     }
 
     /// Obtain a document by handle
-    pub fn get_by_handle(&self, handle: DocumentHandle) -> Option<&Document> {
+    pub fn get_by_handle(&self, handle: DocumentHandle) -> Option<&Document<S>> {
         // only works if the handle is from this collection
         if handle.documents_id != self.id {
             return None;
@@ -173,27 +173,27 @@ impl Documents {
     }
 
     /// Obtain document root node by handle
-    pub fn get_node_by_handle(&self, handle: DocumentHandle) -> Option<xot::Node> {
+    pub fn get_node_by_handle(&self, handle: DocumentHandle) -> Option<S::Node> {
         Some(self.get_by_handle(handle)?.root)
     }
 
     /// Obtain a document by URI
     ///
     /// It's only possible to obtain a document by URI if it was added with a URI.
-    pub fn get_by_uri(&self, uri: &IriStr) -> Option<&Document> {
+    pub fn get_by_uri(&self, uri: &IriStr) -> Option<&Document<S>> {
         let handle = self.by_uri.get(uri)?;
         self.get_by_handle(*handle)
     }
 
     /// Obtain document node by URI
-    pub fn get_node_by_uri(&self, uri: &IriStr) -> Option<xot::Node> {
+    pub fn get_node_by_uri(&self, uri: &IriStr) -> Option<S::Node> {
         Some(self.get_by_uri(uri)?.root)
     }
 
     /// Obtain document URI by document node.
     ///
     /// This only returns a URI if the document was added with a URI.
-    pub fn get_uri_by_document_node(&self, node: xot::Node) -> Option<IriString> {
+    pub fn get_uri_by_document_node(&self, node: S::Node) -> Option<IriString> {
         self.uri_by_document_node.get(&node).cloned()
     }
 
@@ -208,16 +208,16 @@ impl Documents {
     }
 
     /// Get the annotations object
-    pub(crate) fn annotations(&self) -> &DocumentOrderAnnotations {
+    pub(crate) fn annotations(&self) -> &DocumentOrderAnnotations<S> {
         &self.annotations
     }
 
-    pub(crate) fn document_order_access<'a>(&'a self, xot: &'a Xot) -> DocumentOrderAccess<'a> {
-        self.annotations.access(xot)
+    pub(crate) fn document_order_access<'a>(&'a self, source: &'a S) -> DocumentOrderAccess<'a, S> {
+        self.annotations.access(source)
     }
 }
 
-impl Default for Documents {
+impl<S: XmlDS> Default for Documents<S> {
     fn default() -> Self {
         Self::new()
     }

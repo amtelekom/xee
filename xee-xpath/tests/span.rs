@@ -2,8 +2,9 @@ mod common;
 
 use common::run;
 use xee_xpath::{error, Sequence};
+use xot::Node;
 
-fn span(result: error::Result<Sequence>) -> error::SourceSpan {
+fn span(result: error::Result<Sequence<Node>>) -> error::SourceSpan {
     result.err().unwrap().span.unwrap()
 }
 

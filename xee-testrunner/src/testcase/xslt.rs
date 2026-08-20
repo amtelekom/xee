@@ -8,6 +8,7 @@ use xee_xpath::{
     Queries, Query,
 };
 use xee_xpath_load::{convert_string, ContextLoadable};
+use xot::Xot;
 
 use crate::{
     catalog::{Catalog, LoadContext},
@@ -89,7 +90,7 @@ impl Runnable<XsltLanguage> for XsltTestCase {
             }
         };
 
-        // let root = run_context.documents.xot().parse(xml).unwrap();
+        // let root = run_context.documents.source().parse(xml).unwrap();
 
         // get static base URI: todo refactor out into its own function
         let static_base_uri = self.test_case.static_base_uri(catalog, test_set);
@@ -141,7 +142,7 @@ impl Runnable<XsltLanguage> for XsltTestCase {
         builder.current_datetime(chrono::offset::Utc::now().into());
         let context = builder.build();
         let runnable = program.runnable(&context);
-        let result = runnable.many(run_context.documents.xot_mut());
+        let result = runnable.many(run_context.documents.source_mut());
 
         self.test_case.result.assert_result(
             &context,
@@ -150,7 +151,7 @@ impl Runnable<XsltLanguage> for XsltTestCase {
         )
     }
 
-    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self, Xot>> {
         XsltTestCase::load_with_context(queries, context)
     }
 }
@@ -162,7 +163,10 @@ impl ContextLoadable<LoadContext> for XsltTestCase {
         builder
     }
 
-    fn load_with_context(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load_with_context(
+        queries: &Queries,
+        context: &LoadContext,
+    ) -> Result<impl Query<Self, Xot>> {
         let file_query = queries.option("@file/string()", convert_string)?;
         let stylesheets_query = queries.many("stylesheet", move |documents, item| {
             let file = file_query.execute(documents, item)?;

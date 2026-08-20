@@ -1,22 +1,26 @@
 use std::rc::Rc;
 
+use crate::function::XmlDS;
 use ahash::{HashMap, HashMapExt};
+use xee_datasource::XmlNode;
 use xee_schema_type::Xs;
 use xee_xpath_ast::ast;
-use xot::Xot;
 
 use crate::{atomic, context, error, sequence, string};
 
 /// An XPath Map (a collection of key-value pairs).
 #[derive(Debug, Clone, PartialEq)]
-pub enum Map {
+pub enum Map<N: XmlNode> {
     Empty(EmptyMap),
-    One(OneMap),
-    Many(ManyMap),
+    One(OneMap<N>),
+    Many(ManyMap<N>),
 }
 
-impl Map {
-    pub(crate) fn new(entries: Vec<(atomic::Atomic, sequence::Sequence)>) -> error::Result<Self> {
+#[allow(type_alias_bounds)]
+pub type Entry<N: XmlNode> = (atomic::Atomic, sequence::Sequence<N>);
+
+impl<N: XmlNode> Map<N> {
+    pub(crate) fn new(entries: Vec<Entry<N>>) -> error::Result<Self> {
         match entries.len() {
             0 => Ok(Self::Empty(EmptyMap)),
             1 => {
@@ -34,7 +38,7 @@ impl Map {
         }
     }
 
-    fn from_map(map: HashMap<atomic::MapKey, (atomic::Atomic, sequence::Sequence)>) -> Self {
+    fn from_map(map: HashMap<atomic::MapKey, Entry<N>>) -> Self {
         match map.len() {
             0 => Self::Empty(EmptyMap),
             1 => {
@@ -52,9 +56,12 @@ impl Map {
     }
 
     pub(crate) fn combine(
-        maps: impl Iterator<Item = error::Result<Map>>,
-        combine: impl Fn(sequence::Sequence, sequence::Sequence) -> error::Result<sequence::Sequence>,
-    ) -> error::Result<Map> {
+        maps: impl Iterator<Item = error::Result<Map<N>>>,
+        combine: impl Fn(
+            sequence::Sequence<N>,
+            sequence::Sequence<N>,
+        ) -> error::Result<sequence::Sequence<N>>,
+    ) -> error::Result<Map<N>> {
         let mut result = HashMap::new();
         for map in maps {
             for (map_key, (key, value)) in map?.full_entries() {
@@ -73,19 +80,19 @@ impl Map {
 
     pub(crate) fn len(&self) -> usize {
         match self {
-            Map::Empty(map) => map.len(),
+            Map::Empty(map) => Mappable::<N>::len(map),
             Map::One(map) => map.len(),
             Map::Many(map) => map.len(),
         }
     }
     pub(crate) fn is_empty(&self) -> bool {
         match self {
-            Map::Empty(map) => map.is_empty(),
+            Map::Empty(map) => Mappable::<N>::is_empty(map),
             Map::One(map) => map.is_empty(),
             Map::Many(map) => map.is_empty(),
         }
     }
-    pub(crate) fn get(&self, key: &atomic::Atomic) -> Option<&sequence::Sequence> {
+    pub(crate) fn get(&self, key: &atomic::Atomic) -> Option<&sequence::Sequence<N>> {
         match self {
             Map::Empty(map) => map.get(key),
             Map::One(map) => map.get(key),
@@ -94,14 +101,14 @@ impl Map {
     }
     pub(crate) fn keys(&self) -> Box<dyn Iterator<Item = &atomic::Atomic> + '_> {
         match self {
-            Map::Empty(map) => Box::new(map.keys()),
+            Map::Empty(map) => Box::new(Mappable::<N>::keys(map)),
             Map::One(map) => Box::new(map.keys()),
             Map::Many(map) => Box::new(map.keys()),
         }
     }
     pub(crate) fn entries(
         &self,
-    ) -> Box<dyn Iterator<Item = (&atomic::Atomic, &sequence::Sequence)> + '_> {
+    ) -> Box<dyn Iterator<Item = (&atomic::Atomic, &sequence::Sequence<N>)> + '_> {
         match self {
             Map::Empty(map) => Box::new(map.entries()),
             Map::One(map) => Box::new(map.entries()),
@@ -111,7 +118,7 @@ impl Map {
 
     pub(crate) fn map_keys(&self) -> Box<dyn Iterator<Item = &'_ atomic::MapKey> + '_> {
         match self {
-            Map::Empty(map) => Box::new(map.map_keys()),
+            Map::Empty(map) => Box::new(Mappable::<N>::map_keys(map)),
             Map::One(map) => Box::new(map.map_keys()),
             Map::Many(map) => Box::new(map.map_keys()),
         }
@@ -119,7 +126,7 @@ impl Map {
 
     pub(crate) fn map_key_entries(
         &self,
-    ) -> Box<dyn Iterator<Item = (&atomic::MapKey, &sequence::Sequence)> + '_> {
+    ) -> Box<dyn Iterator<Item = (&atomic::MapKey, &sequence::Sequence<N>)> + '_> {
         match self {
             Map::Empty(map) => Box::new(map.map_key_entries()),
             Map::One(map) => Box::new(map.map_key_entries()),
@@ -129,8 +136,7 @@ impl Map {
 
     pub(crate) fn full_entries(
         &self,
-    ) -> Box<dyn Iterator<Item = (&atomic::MapKey, &(atomic::Atomic, sequence::Sequence))> + '_>
-    {
+    ) -> Box<dyn Iterator<Item = (&atomic::MapKey, &Entry<N>)> + '_> {
         match self {
             Map::Empty(map) => Box::new(map.full_entries()),
             Map::One(map) => Box::new(map.full_entries()),
@@ -138,59 +144,65 @@ impl Map {
         }
     }
 
-    pub(crate) fn get_as_type(
+    pub(crate) fn get_as_type<S: XmlDS<Node = N>>(
         &self,
         key: &atomic::Atomic,
         occurrence: ast::Occurrence,
         atomic_type: Xs,
-        static_context: &context::StaticContext,
-        xot: &Xot,
-    ) -> error::Result<Option<sequence::Sequence>> {
+        static_context: &context::StaticContext<S>,
+        source: &S,
+    ) -> error::Result<Option<sequence::Sequence<N>>> {
         match self {
-            Map::Empty(map) => map.get_as_type(key, occurrence, atomic_type, static_context, xot),
-            Map::One(map) => map.get_as_type(key, occurrence, atomic_type, static_context, xot),
-            Map::Many(map) => map.get_as_type(key, occurrence, atomic_type, static_context, xot),
+            Map::Empty(map) => {
+                map.get_as_type(key, occurrence, atomic_type, static_context, source)
+            }
+            Map::One(map) => map.get_as_type(key, occurrence, atomic_type, static_context, source),
+            Map::Many(map) => map.get_as_type(key, occurrence, atomic_type, static_context, source),
         }
     }
 
-    pub(crate) fn deep_equal(
+    pub(crate) fn deep_equal<S: XmlDS<Node = N>>(
         &self,
-        other: &Map,
+        other: &Map<N>,
         collation: &string::Collation,
         default_offset: chrono::FixedOffset,
-        xot: &Xot,
+        source: &S,
     ) -> error::Result<bool> {
         match (self, other) {
             (Map::Empty(_), Map::Empty(_)) => Ok(true),
             (Map::Empty(_), _) => Ok(false),
             (_, Map::Empty(_)) => Ok(false),
             (Map::One(map), Map::One(other)) => {
-                map.deep_equal(other, collation, default_offset, xot)
+                map.deep_equal(other, collation, default_offset, source)
             }
             (Map::One(map), Map::Many(other)) => {
-                map.deep_equal(other, collation, default_offset, xot)
+                map.deep_equal(other, collation, default_offset, source)
             }
             (Map::Many(map), Map::Many(other)) => {
-                map.deep_equal(other, collation, default_offset, xot)
+                map.deep_equal(other, collation, default_offset, source)
             }
             (Map::Many(map), Map::One(other)) => {
-                map.deep_equal(other, collation, default_offset, xot)
+                map.deep_equal(other, collation, default_offset, source)
             }
         }
     }
 
-    pub fn display_representation(&self, xot: &Xot, context: &context::DynamicContext) -> String {
+    pub fn display_representation<S: XmlDS<Node = N>>(
+        &self,
+        source: &S,
+        context: &context::DynamicContext<S>,
+    ) -> String {
         match self {
-            Map::Empty(map) => map.display_representation(xot, context),
-            Map::One(map) => map.display_representation(xot, context),
-            Map::Many(map) => map.display_representation(xot, context),
+            Map::Empty(map) => map.display_representation(source, context),
+            Map::One(map) => map.display_representation(source, context),
+            Map::Many(map) => map.display_representation(source, context),
         }
     }
 
     pub(crate) fn put(
         &self,
         key: atomic::Atomic,
-        value: &sequence::Sequence,
+        value: &sequence::Sequence<N>,
     ) -> error::Result<Self> {
         Ok(match self {
             Map::Empty(_) => {
@@ -249,25 +261,25 @@ impl Map {
     }
 }
 
-pub(crate) trait Mappable {
+pub(crate) trait Mappable<N: XmlNode> {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
 
     // get a key by underlying map key
-    fn get_by_map_key(&self, map_key: &atomic::MapKey) -> Option<&sequence::Sequence>;
+    fn get_by_map_key(&self, map_key: &atomic::MapKey) -> Option<&sequence::Sequence<N>>;
 
     /// get map keys
     fn map_keys(&self) -> impl Iterator<Item = &'_ atomic::MapKey> + '_;
 
     // get map entries, key is map key
-    fn map_key_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence)> + '_;
-
-    fn full_entries(
+    fn map_key_entries(
         &self,
-    ) -> impl Iterator<Item = (&atomic::MapKey, &(atomic::Atomic, sequence::Sequence))> + '_;
+    ) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence<N>)> + '_;
+
+    fn full_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &Entry<N>)> + '_;
 
     // get a key by atomic
-    fn get(&self, key: &atomic::Atomic) -> Option<&sequence::Sequence> {
+    fn get(&self, key: &atomic::Atomic) -> Option<&sequence::Sequence<N>> {
         let map_key = atomic::MapKey::new(key.clone()).ok()?;
         self.get_by_map_key(&map_key)
     }
@@ -276,17 +288,17 @@ pub(crate) trait Mappable {
     fn keys(&self) -> impl Iterator<Item = &atomic::Atomic> + '_;
 
     // get entries with atomic key and value
-    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence)> + '_;
+    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence<N>)> + '_;
 
     // get a key by atomic and convert to a specific type
-    fn get_as_type(
+    fn get_as_type<S: XmlDS<Node = N>>(
         &self,
         key: &atomic::Atomic,
         occurrence: ast::Occurrence,
         atomic_type: Xs,
-        static_context: &context::StaticContext,
-        xot: &Xot,
-    ) -> error::Result<Option<sequence::Sequence>> {
+        static_context: &context::StaticContext<S>,
+        source: &S,
+    ) -> error::Result<Option<sequence::Sequence<N>>> {
         let value = self.get(key);
         let value = match value {
             Some(value) => value,
@@ -301,7 +313,7 @@ pub(crate) trait Mappable {
             value.clone().sequence_type_matching_function_conversion(
                 &sequence_type,
                 static_context,
-                xot,
+                source,
                 // typed function tests can't be invoked
                 &|_function| unreachable!(),
             )?,
@@ -309,12 +321,12 @@ pub(crate) trait Mappable {
     }
 
     // deep equal compare between two mappables
-    fn deep_equal(
+    fn deep_equal<S: XmlDS<Node = N>>(
         &self,
-        other: &impl Mappable,
+        other: &impl Mappable<N>,
         collation: &string::Collation,
         default_offset: chrono::FixedOffset,
-        xot: &Xot,
+        source: &S,
     ) -> error::Result<bool> {
         if self.len() != other.len() {
             return Ok(false);
@@ -322,7 +334,7 @@ pub(crate) trait Mappable {
         for (map_key, value) in self.map_key_entries() {
             let other_value = other.get_by_map_key(map_key);
             if let Some(other_value) = other_value {
-                if !value.deep_equal(other_value, collation, default_offset, xot)? {
+                if !value.deep_equal(other_value, collation, default_offset, source)? {
                     return Ok(false);
                 }
             } else {
@@ -332,14 +344,18 @@ pub(crate) trait Mappable {
         Ok(true)
     }
 
-    fn display_representation(&self, xot: &Xot, context: &context::DynamicContext) -> String {
+    fn display_representation<S: XmlDS<Node = N>>(
+        &self,
+        source: &S,
+        context: &context::DynamicContext<S>,
+    ) -> String {
         let mut entries = self
             .entries()
             .map(|(key, value)| {
                 format!(
                     "{}: {}",
                     key.xpath_representation(),
-                    value.display_representation(xot, context)
+                    value.display_representation(source, context)
                 )
             })
             .collect::<Vec<_>>();
@@ -352,7 +368,7 @@ pub(crate) trait Mappable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmptyMap;
 
-impl Mappable for EmptyMap {
+impl<N: XmlNode> Mappable<N> for EmptyMap {
     fn len(&self) -> usize {
         0
     }
@@ -361,7 +377,7 @@ impl Mappable for EmptyMap {
         true
     }
 
-    fn get_by_map_key(&self, _map_key: &atomic::MapKey) -> Option<&sequence::Sequence> {
+    fn get_by_map_key(&self, _map_key: &atomic::MapKey) -> Option<&sequence::Sequence<N>> {
         None
     }
 
@@ -369,13 +385,13 @@ impl Mappable for EmptyMap {
         std::iter::empty()
     }
 
-    fn map_key_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence)> + '_ {
+    fn map_key_entries(
+        &self,
+    ) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence<N>)> + '_ {
         std::iter::empty()
     }
 
-    fn full_entries(
-        &self,
-    ) -> impl Iterator<Item = (&atomic::MapKey, &(atomic::Atomic, sequence::Sequence))> + '_ {
+    fn full_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &Entry<N>)> + '_ {
         std::iter::empty()
     }
 
@@ -383,27 +399,27 @@ impl Mappable for EmptyMap {
         std::iter::empty()
     }
 
-    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence)> + '_ {
+    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence<N>)> + '_ {
         std::iter::empty()
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OneMap(Box<OneMapValue>);
+pub struct OneMap<N: XmlNode>(Box<OneMapValue<N>>);
 
 #[derive(Debug, Clone, PartialEq)]
-struct OneMapValue {
+struct OneMapValue<N: XmlNode> {
     map_key: atomic::MapKey,
-    key_value: (atomic::Atomic, sequence::Sequence),
+    key_value: Entry<N>,
 }
 
-impl From<OneMapValue> for OneMap {
-    fn from(value: OneMapValue) -> Self {
+impl<N: XmlNode> From<OneMapValue<N>> for OneMap<N> {
+    fn from(value: OneMapValue<N>) -> Self {
         Self(Box::new(value))
     }
 }
 
-impl Mappable for OneMap {
+impl<N: XmlNode> Mappable<N> for OneMap<N> {
     fn len(&self) -> usize {
         1
     }
@@ -412,7 +428,7 @@ impl Mappable for OneMap {
         false
     }
 
-    fn get_by_map_key(&self, map_key: &atomic::MapKey) -> Option<&sequence::Sequence> {
+    fn get_by_map_key(&self, map_key: &atomic::MapKey) -> Option<&sequence::Sequence<N>> {
         if &self.0.map_key == map_key {
             Some(&self.0.key_value.1)
         } else {
@@ -424,13 +440,13 @@ impl Mappable for OneMap {
         std::iter::once(&self.0.map_key)
     }
 
-    fn map_key_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence)> + '_ {
+    fn map_key_entries(
+        &self,
+    ) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence<N>)> + '_ {
         std::iter::once((&self.0.map_key, &self.0.key_value.1))
     }
 
-    fn full_entries(
-        &self,
-    ) -> impl Iterator<Item = (&atomic::MapKey, &(atomic::Atomic, sequence::Sequence))> + '_ {
+    fn full_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &Entry<N>)> + '_ {
         std::iter::once((&self.0.map_key, &self.0.key_value))
     }
 
@@ -438,17 +454,17 @@ impl Mappable for OneMap {
         std::iter::once(&self.0.key_value.0)
     }
 
-    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence)> + '_ {
+    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence<N>)> + '_ {
         std::iter::once((&self.0.key_value.0, &self.0.key_value.1))
     }
 }
 
 // a normal map uses a hashmap to store > 1 key-value pairs
 #[derive(Debug, Clone, PartialEq)]
-pub struct ManyMap(Rc<HashMap<atomic::MapKey, (atomic::Atomic, sequence::Sequence)>>);
+pub struct ManyMap<N: XmlNode>(Rc<HashMap<atomic::MapKey, Entry<N>>>);
 
-impl ManyMap {
-    fn new(entries: Vec<(atomic::Atomic, sequence::Sequence)>) -> error::Result<Self> {
+impl<N: XmlNode> ManyMap<N> {
+    fn new(entries: Vec<Entry<N>>) -> error::Result<Self> {
         let mut map = HashMap::new();
         for (key, value) in entries {
             let map_key = atomic::MapKey::new(key.clone())?;
@@ -463,7 +479,7 @@ impl ManyMap {
     pub(crate) fn put(
         &self,
         key: atomic::Atomic,
-        value: &sequence::Sequence,
+        value: &sequence::Sequence<N>,
     ) -> error::Result<Self> {
         let mut map = self.0.as_ref().clone();
         let map_key = atomic::MapKey::new(key.clone())?;
@@ -474,7 +490,7 @@ impl ManyMap {
     pub(crate) fn remove_keys(
         &self,
         keys: impl Iterator<Item = error::Result<atomic::Atomic>>,
-    ) -> error::Result<HashMap<atomic::MapKey, (atomic::Atomic, sequence::Sequence)>> {
+    ) -> error::Result<HashMap<atomic::MapKey, Entry<N>>> {
         let mut map = self.0.as_ref().clone();
         for key in keys {
             let map_key = atomic::MapKey::new(key?.clone()).unwrap();
@@ -484,7 +500,7 @@ impl ManyMap {
     }
 }
 
-impl Mappable for ManyMap {
+impl<N: XmlNode> Mappable<N> for ManyMap<N> {
     fn len(&self) -> usize {
         self.0.len()
     }
@@ -493,7 +509,7 @@ impl Mappable for ManyMap {
         self.0.is_empty()
     }
 
-    fn get_by_map_key(&self, map_key: &atomic::MapKey) -> Option<&sequence::Sequence> {
+    fn get_by_map_key(&self, map_key: &atomic::MapKey) -> Option<&sequence::Sequence<N>> {
         self.0.get(map_key).map(|(_, v)| v)
     }
 
@@ -501,13 +517,13 @@ impl Mappable for ManyMap {
         self.0.keys()
     }
 
-    fn map_key_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence)> + '_ {
+    fn map_key_entries(
+        &self,
+    ) -> impl Iterator<Item = (&atomic::MapKey, &sequence::Sequence<N>)> + '_ {
         self.0.iter().map(|(k, (_, v))| (k, v))
     }
 
-    fn full_entries(
-        &self,
-    ) -> impl Iterator<Item = (&atomic::MapKey, &(atomic::Atomic, sequence::Sequence))> + '_ {
+    fn full_entries(&self) -> impl Iterator<Item = (&atomic::MapKey, &Entry<N>)> + '_ {
         self.0.iter()
     }
 
@@ -515,14 +531,14 @@ impl Mappable for ManyMap {
         self.0.values().map(|(k, _)| k)
     }
 
-    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence)> + '_ {
+    fn entries(&self) -> impl Iterator<Item = (&atomic::Atomic, &sequence::Sequence<N>)> + '_ {
         self.0.iter().map(|(_, (k, v))| (k, v))
     }
 }
 
-impl TryFrom<Vec<(atomic::Atomic, sequence::Sequence)>> for ManyMap {
+impl<N: XmlNode> TryFrom<Vec<Entry<N>>> for ManyMap<N> {
     type Error = error::Error;
-    fn try_from(vec: Vec<(atomic::Atomic, sequence::Sequence)>) -> error::Result<Self> {
+    fn try_from(vec: Vec<Entry<N>>) -> error::Result<Self> {
         Self::new(vec)
     }
 }

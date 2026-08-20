@@ -1,4 +1,4 @@
-use xot::xmlname::NameStrInfo;
+use xee_datasource::xmlname::NameStrInfo;
 
 use super::{Atomic, StringType};
 
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_qname() {
-        let name = xot::xmlname::OwnedName::new(
+        let name = xee_datasource::xmlname::OwnedName::new(
             "foo".to_string(),
             "http://example.com".to_string(),
             "".to_string(),

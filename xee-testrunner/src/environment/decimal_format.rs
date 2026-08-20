@@ -1,4 +1,4 @@
-type Name = xot::xmlname::OwnedName;
+type Name = xee_datasource::xmlname::OwnedName;
 
 /// Only is used by XPath tests, not XSLT
 #[derive(Debug, Clone, PartialEq, Eq)]

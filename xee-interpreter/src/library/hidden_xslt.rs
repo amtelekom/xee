@@ -1,10 +1,13 @@
-// functions used to implement the XSLT that aren't supposed to be
-// exposed to XPath
+//! functions used to implement the XSLT that aren't supposed to be
+//! exposed to XPath
+use xee_datasource::StringNewtype;
+use xee_datasource::ValueRef;
+
 use xee_xpath_macros::xpath_fn;
-use xot::Xot;
 
 use crate::error;
 use crate::function::StaticFunctionDescription;
+use crate::function::XmlDS;
 use crate::interpreter::Interpreter;
 use crate::sequence;
 use crate::wrap_xpath_fn;
@@ -14,16 +17,16 @@ use crate::wrap_xpath_fn;
 // https://www.w3.org/TR/xslt-30/#constructing-simple-content
 
 #[xpath_fn("fn:simple-content($arg as item()*, $separator as xs:string) as xs:string?")]
-fn simple_content(
-    interpreter: &Interpreter,
-    arg: &sequence::Sequence,
+fn simple_content<S: XmlDS>(
+    interpreter: &Interpreter<S>,
+    arg: &sequence::Sequence<S::Node>,
     separator: &str,
 ) -> error::Result<String> {
-    let arg = simple_content_text_nodes(arg, interpreter.xot())?;
+    let arg = simple_content_text_nodes(arg, interpreter.source())?;
     // now atomize the sequence, putting in separators, except at the end
     let mut s = String::new();
     let mut first = true;
-    for atom in arg.atomized(interpreter.xot()) {
+    for atom in arg.atomized(interpreter.source()) {
         let atom = atom?;
         if !first {
             s.push_str(separator);
@@ -34,21 +37,21 @@ fn simple_content(
     Ok(s)
 }
 
-fn simple_content_text_nodes(
-    arg: &sequence::Sequence,
-    xot: &Xot,
-) -> error::Result<sequence::Sequence> {
+fn simple_content_text_nodes<S: XmlDS>(
+    arg: &sequence::Sequence<S::Node>,
+    source: &S,
+) -> error::Result<sequence::Sequence<S::Node>> {
     // 1. zero-length text nodes in the sequence are discarded
     // 2. adjacent text nodes are merged into a single text node
 
     // Note: to avoid having to create xot nodes on the fly, we actually
     // turn adjecent text nodes into atomic string nodes, which should be
     // fine.
-    let mut r: Vec<sequence::Item> = Vec::new();
+    let mut r: Vec<sequence::Item<S::Node>> = Vec::new();
     let mut last_text: Option<String> = None;
     for item in arg.iter() {
         if let sequence::Item::Node(node) = item {
-            if let xot::Value::Text(text) = xot.value(node) {
+            if let ValueRef::Text(text) = source.value(node) {
                 let text = text.get();
                 if text.is_empty() {
                     continue;
@@ -76,8 +79,8 @@ fn simple_content_text_nodes(
     Ok(r.into())
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
-    vec![wrap_xpath_fn!(simple_content)]
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
+    vec![wrap_xpath_fn!(simple_content, S)]
 }
 
 #[cfg(test)]
@@ -85,6 +88,7 @@ mod tests {
     use super::*;
 
     use sequence::{Item, Sequence};
+    use xot::Xot;
 
     #[test]
     fn test_filter_empty_text_nodes() {

@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 
 use xee_xpath::Documents;
 use xee_xpath_load::PathLoadable;
+use xot::Xot;
 
 use crate::catalog::{Catalog, LoadContext};
 use crate::filter::{ExcludedNamesFilter, IncludeAllFilter, NameFilter, TestFilter};
@@ -93,7 +94,7 @@ pub fn cli() -> Result<()> {
 }
 
 fn cli_run<L: Language>(cli: Cli, path_info: PathInfo) -> Result<()> {
-    let mut documents = Documents::new();
+    let mut documents = Documents::new(Xot::new());
     let run_context = RunContext::new(&mut documents, L::known_dependencies(), cli.verbose);
     let mut runner = Runner::<L>::new(run_context, path_info);
     match cli.command {

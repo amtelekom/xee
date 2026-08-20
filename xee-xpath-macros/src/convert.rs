@@ -12,13 +12,14 @@ pub(crate) fn convert_sequence_type(
     fn_arg: &syn::FnArg,
     name: TokenStream,
     arg: TokenStream,
+    interpreter_crate: &TokenStream,
 ) -> syn::Result<TokenStream> {
     match sequence_type {
         ast::SequenceType::Empty => Ok(quote!(
             #[allow(non_snake_case)]
             let #name = #arg.ensure_empty()?;
         )),
-        ast::SequenceType::Item(item) => convert_item(item, fn_arg, name, arg),
+        ast::SequenceType::Item(item) => convert_item(item, fn_arg, name, arg, interpreter_crate),
     }
 }
 
@@ -27,6 +28,7 @@ fn convert_item(
     fn_arg: &syn::FnArg,
     name: TokenStream,
     arg: TokenStream,
+    interpreter_crate: &TokenStream,
 ) -> syn::Result<TokenStream> {
     let (iterator, borrow) = convert_item_type(&item.item_type, arg.clone())?;
 
@@ -42,7 +44,7 @@ fn convert_item(
             };
             quote!(
                 #[allow(non_snake_case)]
-                let #name = crate::occurrence::one(&mut #iterator)?;
+                let #name = #interpreter_crate::occurrence::one(&mut #iterator)?;
                 #as_ref
             )
         }
@@ -57,7 +59,7 @@ fn convert_item(
             };
             quote!(
                 #[allow(non_snake_case)]
-                let #name = crate::occurrence::option(&mut #iterator)?;
+                let #name = #interpreter_crate::occurrence::option(&mut #iterator)?;
                 #as_ref
             )
         }
@@ -121,7 +123,7 @@ fn convert_item_type(item: &ast::ItemType, arg: TokenStream) -> syn::Result<(Tok
 
 fn convert_atomic_or_union_type(xs: Xs, arg: TokenStream) -> syn::Result<(TokenStream, bool)> {
     if xs == Xs::AnyAtomicType || xs == Xs::Numeric {
-        return Ok((quote!(#arg.atomized(interpreter.xot())), false));
+        return Ok((quote!(#arg.atomized(interpreter.source())), false));
     }
 
     // TODO: another unwrap that should really be "we cannot create a rust wrapper
@@ -135,7 +137,7 @@ fn convert_atomic_or_union_type(xs: Xs, arg: TokenStream) -> syn::Result<(TokenS
 
     let borrow = rust_info.is_reference();
     Ok((
-        quote!(#arg.unboxed_atomized(interpreter.xot(), |atomic| #convert)),
+        quote!(#arg.unboxed_atomized(interpreter.source(), |atomic| #convert)),
         borrow,
     ))
 }
@@ -147,7 +149,7 @@ fn convert_kind_test(kind_test: &ast::KindTest, arg: TokenStream) -> syn::Result
             if element_test.is_some() {
                 unreachable!("Unsupported element test")
             }
-            Ok(quote!(#arg.elements(interpreter.xot())?))
+            Ok(quote!(#arg.elements(interpreter.source())?))
         }
         _ => {
             todo!("Unsupported kind test")
@@ -161,7 +163,7 @@ fn is_sequence_arg(fn_arg: &syn::FnArg) -> bool {
         syn::FnArg::Typed(type_) => match type_.ty.as_ref() {
             syn::Type::Reference(type_) => match type_.elem.as_ref() {
                 syn::Type::Path(type_) => {
-                    let segment = type_.path.segments.last();
+                    let segment = type_.path.segments.iter().next_back();
                     match segment {
                         Some(syn::PathSegment {
                             ident,
@@ -194,8 +196,9 @@ mod tests {
         let sequence_type = parse_sequence_type(s, &namespaces).unwrap();
         let name = quote!(a);
         let arg = quote!(arguments[0]);
+        let interpreter_crate = quote! { crate };
 
-        convert_sequence_type(&sequence_type, fn_arg, name, arg)
+        convert_sequence_type(&sequence_type, fn_arg, name, arg, &interpreter_crate)
             .unwrap()
             .to_string()
     }

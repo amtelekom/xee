@@ -2,6 +2,7 @@ use iri_string::types::{IriAbsoluteStr, IriReferenceStr};
 
 use xee_xpath_macros::xpath_fn;
 
+use crate::function::XmlDS;
 use crate::{atomic, function::StaticFunctionDescription, wrap_xpath_fn};
 use crate::{context, error};
 
@@ -51,8 +52,8 @@ const ENCODE_FOR_URI: percent_encoding::AsciiSet = percent_encoding::CONTROLS
     .add(b'}');
 
 #[xpath_fn("fn:resolve-uri($relative as xs:string?) as xs:anyURI?")]
-fn resolve_uri1(
-    context: &context::DynamicContext,
+fn resolve_uri1<S: XmlDS>(
+    context: &context::DynamicContext<S>,
     relative: Option<&str>,
 ) -> error::Result<Option<atomic::Atomic>> {
     let base = context.static_context().static_base_uri();
@@ -124,12 +125,12 @@ fn escape_html_uri(uri: Option<&str>) -> String {
     }
 }
 
-pub(crate) fn static_function_descriptions() -> Vec<StaticFunctionDescription> {
+pub(crate) fn static_function_descriptions<S: XmlDS>() -> Vec<StaticFunctionDescription<S>> {
     vec![
-        wrap_xpath_fn!(resolve_uri1),
-        wrap_xpath_fn!(resolve_uri2),
-        wrap_xpath_fn!(encode_for_uri),
-        wrap_xpath_fn!(iri_to_uri),
-        wrap_xpath_fn!(escape_html_uri),
+        wrap_xpath_fn!(resolve_uri1, S),
+        wrap_xpath_fn!(resolve_uri2, S),
+        wrap_xpath_fn!(encode_for_uri, S),
+        wrap_xpath_fn!(iri_to_uri, S),
+        wrap_xpath_fn!(escape_html_uri, S),
     ]
 }

@@ -1,23 +1,24 @@
 use crate::context;
 use crate::declaration::Declarations;
 use crate::function;
+use crate::function::XmlDS;
 use xee_name::Name;
 use xee_xpath_ast::ast::Span;
 
 use super::Runnable;
 
 #[derive(Debug)]
-pub struct Program {
+pub struct Program<S: XmlDS> {
     span: Span,
-    pub functions: Vec<function::InlineFunction>,
+    pub functions: Vec<function::InlineFunction<S>>,
     pub declarations: Declarations,
-    static_context: context::StaticContext,
+    static_context: context::StaticContext<S>,
     map_signature: function::Signature,
     array_signature: function::Signature,
 }
 
-impl Program {
-    pub fn new(static_context: context::StaticContext, span: Span) -> Self {
+impl<S: XmlDS> Program<S> {
+    pub fn new(static_context: context::StaticContext<S>, span: Span) -> Self {
         Program {
             span,
             functions: Vec::new(),
@@ -28,11 +29,11 @@ impl Program {
         }
     }
 
-    pub fn static_context(&self) -> &context::StaticContext {
+    pub fn static_context(&self) -> &context::StaticContext<S> {
         &self.static_context
     }
 
-    pub fn dynamic_context_builder(&self) -> context::DynamicContextBuilder<'_> {
+    pub fn dynamic_context_builder(&self) -> context::DynamicContextBuilder<'_, S> {
         context::DynamicContextBuilder::new(self)
     }
 
@@ -43,32 +44,35 @@ impl Program {
     pub(crate) fn inline_function(
         &self,
         function_id: function::InlineFunctionId,
-    ) -> &function::InlineFunction {
+    ) -> &function::InlineFunction<S> {
         &self.functions[function_id.0]
     }
 
     pub(crate) fn static_function(
         &self,
         function_id: function::StaticFunctionId,
-    ) -> &function::StaticFunction {
+    ) -> &function::StaticFunction<S> {
         self.static_context.function_by_id(function_id)
     }
 
     pub fn function_info<'a, 'b>(
         &'a self,
-        function: &'b function::Function,
-    ) -> FunctionInfo<'a, 'b> {
+        function: &'b function::Function<S::Node>,
+    ) -> FunctionInfo<'a, 'b, S> {
         FunctionInfo::new(function, self)
     }
 
     /// Obtain a runnable version of this program, with a particular dynamic context.
-    pub fn runnable<'a>(&'a self, dynamic_context: &'a context::DynamicContext) -> Runnable<'a> {
+    pub fn runnable<'a>(
+        &'a self,
+        dynamic_context: &'a context::DynamicContext<'a, S>,
+    ) -> Runnable<'a, S> {
         Runnable::new(self, dynamic_context)
     }
 
     pub fn add_function(
         &mut self,
-        function: function::InlineFunction,
+        function: function::InlineFunction<S>,
     ) -> function::InlineFunctionId {
         let id = self.functions.len();
         if id > u16::MAX as usize {
@@ -79,14 +83,14 @@ impl Program {
         function::InlineFunctionId(id)
     }
 
-    pub(crate) fn get_function(&self, index: usize) -> &function::InlineFunction {
+    pub(crate) fn get_function(&self, index: usize) -> &function::InlineFunction<S> {
         &self.functions[index]
     }
 
     pub(crate) fn get_function_by_id(
         &self,
         id: function::InlineFunctionId,
-    ) -> &function::InlineFunction {
+    ) -> &function::InlineFunction<S> {
         self.get_function(id.0)
     }
 
@@ -96,16 +100,16 @@ impl Program {
 }
 
 /// Given a function provide information about it.
-pub struct FunctionInfo<'a, 'b> {
-    function: &'b function::Function,
-    program: &'a Program,
+pub struct FunctionInfo<'a, 'b, S: XmlDS> {
+    function: &'b function::Function<S::Node>,
+    program: &'a Program<S>,
 }
 
-impl<'a, 'b> FunctionInfo<'a, 'b> {
+impl<'a, 'b, S: XmlDS> FunctionInfo<'a, 'b, S> {
     pub(crate) fn new(
-        function: &'b function::Function,
-        program: &'a Program,
-    ) -> FunctionInfo<'a, 'b> {
+        function: &'b function::Function<S::Node>,
+        program: &'a Program<S>,
+    ) -> FunctionInfo<'a, 'b, S> {
         FunctionInfo { function, program }
     }
 

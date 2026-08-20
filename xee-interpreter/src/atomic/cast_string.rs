@@ -6,6 +6,7 @@ use xee_xpath_ast::parse_name;
 use crate::atomic;
 use crate::context;
 use crate::error;
+use crate::function::XmlDS;
 
 use super::cast::{whitespace_collapse, whitespace_replace};
 use super::StringType;
@@ -74,7 +75,9 @@ impl atomic::Atomic {
                 whitespace_collapse(&s).into(),
             )),
             atomic::Atomic::Untyped(s) => Ok(atomic::Atomic::String(StringType::AnyURI, s.clone())),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "cast_to_any_uri called on incompatible Atomic",
+            )),
         }
     }
 
@@ -138,9 +141,9 @@ impl atomic::Atomic {
         self.cast_to_ncname_helper(atomic::StringType::ENTITY)
     }
 
-    pub(crate) fn cast_to_qname(
+    pub(crate) fn cast_to_qname<S: XmlDS>(
         self,
-        static_context: &context::StaticContext,
+        static_context: &context::StaticContext<S>,
     ) -> error::Result<atomic::Atomic> {
         match self {
             atomic::Atomic::QName(_) => Ok(self.clone()),
@@ -169,7 +172,9 @@ impl atomic::Atomic {
                     Err(_) => Err(error::Error::FORG0001),
                 }
             }
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "cast_to_qname called on incompatible Atomic",
+            )),
         }
     }
 }

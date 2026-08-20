@@ -2,9 +2,9 @@ use ahash::AHashMap;
 use chrono::Offset;
 use std::fmt;
 use std::path::PathBuf;
+use xee_datasource::xmlname::{NameStrInfo, OwnedName as Name};
 use xee_xpath::context::{Collation, DynamicContext};
 use xee_xpath::SerializationParameters;
-use xot::xmlname::{NameStrInfo, OwnedName as Name};
 use xot::Xot;
 
 use xee_xpath::query::RecurseQuery;
@@ -20,9 +20,9 @@ type XPathExpr = String;
 pub(crate) trait Assertable {
     fn assert_result(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        result: &error::ValueResult<Sequence>,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        result: &error::ValueResult<Sequence<::xot::Node>>,
     ) -> TestOutcome {
         match result {
             Ok(sequence) => self.assert_value(context, documents, sequence),
@@ -32,9 +32,9 @@ pub(crate) trait Assertable {
 
     fn assert_value(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome;
 }
 
@@ -67,9 +67,9 @@ impl AssertAnyOf {
 impl Assertable for AssertAnyOf {
     fn assert_result(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        result: &error::ValueResult<Sequence>,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        result: &error::ValueResult<Sequence<::xot::Node>>,
     ) -> TestOutcome {
         let mut failed_test_results = Vec::new();
         for test_case_result in &self.0 {
@@ -87,9 +87,9 @@ impl Assertable for AssertAnyOf {
 
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        _sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        _sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         unreachable!();
     }
@@ -107,9 +107,9 @@ impl AssertAllOf {
 impl Assertable for AssertAllOf {
     fn assert_result(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        result: &error::ValueResult<Sequence>,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        result: &error::ValueResult<Sequence<::xot::Node>>,
     ) -> TestOutcome {
         for test_case_result in &self.0 {
             let result = test_case_result.assert_result(context, documents, result);
@@ -123,9 +123,9 @@ impl Assertable for AssertAllOf {
 
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        _sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        _sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         unreachable!();
     }
@@ -143,9 +143,9 @@ impl AssertNot {
 impl Assertable for AssertNot {
     fn assert_result(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        result: &error::ValueResult<Sequence>,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        result: &error::ValueResult<Sequence<::xot::Node>>,
     ) -> TestOutcome {
         let result = self.0.assert_result(context, documents, result);
         match result {
@@ -159,9 +159,9 @@ impl Assertable for AssertNot {
 
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        _sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        _sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         unreachable!();
     }
@@ -185,9 +185,9 @@ impl Assert {
 impl Assertable for Assert {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         let result_sequence = run_xpath_with_result(&self.0, sequence, documents);
 
@@ -219,21 +219,21 @@ impl AssertEq {
 impl Assertable for AssertEq {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         let expected_sequence = run_xpath(&self.0);
 
         match expected_sequence {
             Ok(expected_sequence) => {
-                let atom = xee_xpath::iter::one(sequence.atomized(documents.xot()));
+                let atom = xee_xpath::iter::one(sequence.atomized(documents.source()));
                 let atom = match atom {
                     Ok(atom) => atom,
                     Err(error) => return TestOutcome::RuntimeError(error),
                 };
                 let expected_atom =
-                    xee_xpath::iter::one(expected_sequence.atomized(documents.xot()))
+                    xee_xpath::iter::one(expected_sequence.atomized(documents.source()))
                         .expect("Should get single atom in sequence");
                 if expected_atom.simple_equal(&atom) {
                     TestOutcome::Passed
@@ -258,9 +258,9 @@ impl AssertDeepEq {
 impl Assertable for AssertDeepEq {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         let expected_sequence = run_xpath(&self.0);
 
@@ -271,7 +271,7 @@ impl Assertable for AssertDeepEq {
                         sequence,
                         &Collation::CodePoint,
                         chrono::offset::Utc.fix(),
-                        documents.xot(),
+                        documents.source(),
                     )
                     .unwrap_or(false)
                 {
@@ -297,9 +297,9 @@ impl AssertCount {
 impl Assertable for AssertCount {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         let found_len = sequence.len();
         if found_len == self.0 {
@@ -322,9 +322,9 @@ impl AssertPermutation {
 impl Assertable for AssertPermutation {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         // we won't use the sequence sorting mechanisms defined in XPath
         // here, as in them we can't compare bools with integers for instance,
@@ -335,7 +335,7 @@ impl Assertable for AssertPermutation {
         // whether the result sequence has the same counts.
 
         let mut frequency = AHashMap::new();
-        for atom in sequence.atomized(documents.xot()) {
+        for atom in sequence.atomized(documents.source()) {
             let atom = match atom {
                 Ok(atom) => atom,
                 Err(err) => return TestOutcome::RuntimeError(err),
@@ -350,7 +350,7 @@ impl Assertable for AssertPermutation {
             Err(error) => return TestOutcome::UnsupportedExpression(error.value()),
         };
 
-        for atom in result_sequence.atomized(documents.xot()) {
+        for atom in result_sequence.atomized(documents.source()) {
             let atom = match atom {
                 Ok(atom) => atom,
                 Err(err) => return TestOutcome::RuntimeError(err),
@@ -388,16 +388,16 @@ impl AssertXml {
 impl Assertable for AssertXml {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         let xml = sequence.serialize(
             SerializationParameters {
                 omit_xml_declaration: true,
                 ..Default::default()
             },
-            documents.xot_mut(),
+            documents.source_mut(),
         );
 
         let xml = match xml {
@@ -410,9 +410,9 @@ impl Assertable for AssertXml {
             }
         };
 
-        let mut compare_xot = Xot::new();
+        let mut compare_source = Xot::new();
 
-        let found = compare_xot.parse_fragment(&xml);
+        let found = compare_source.parse_fragment(&xml);
         let found = match found {
             Ok(found) => found,
             Err(_err) => {
@@ -421,7 +421,7 @@ impl Assertable for AssertXml {
         };
 
         let expected = match &self {
-            Self::MatchString(s) => compare_xot.parse_fragment(s).unwrap(),
+            Self::MatchString(s) => compare_source.parse_fragment(s).unwrap(),
             Self::MatchFile(path) => {
                 let expected_xml = std::fs::File::open(path).and_then(std::io::read_to_string);
 
@@ -435,12 +435,12 @@ impl Assertable for AssertXml {
                     }
                 };
 
-                compare_xot.parse(&expected_xml).unwrap()
+                compare_source.parse(&expected_xml).unwrap()
             }
         };
 
         // and compare
-        let c = compare_xot.deep_equal(expected, found);
+        let c = compare_source.deep_equal(expected, found);
 
         if c {
             TestOutcome::Passed
@@ -462,9 +462,9 @@ impl AssertEmpty {
 impl Assertable for AssertEmpty {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         if sequence.is_empty() {
             TestOutcome::Passed
@@ -492,11 +492,11 @@ impl AssertType {
 impl Assertable for AssertType {
     fn assert_value(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
-        let matches = sequence.matches_type(&self.0, documents.xot(), &|function| {
+        let matches = sequence.matches_type(&self.0, documents.source(), &|function| {
             context.function_info(function).signature()
         });
         match matches {
@@ -528,9 +528,9 @@ impl AssertTrue {
 impl Assertable for AssertTrue {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         if let Ok(item) = sequence.clone().one() {
             if let Ok(atomic) = item.to_atomic() {
@@ -558,9 +558,9 @@ impl AssertFalse {
 impl Assertable for AssertFalse {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         if let Ok(item) = sequence.clone().one() {
             if let Ok(atomic) = item.to_atomic() {
@@ -588,14 +588,14 @@ impl AssertStringValue {
 impl Assertable for AssertStringValue {
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         let items = sequence.iter();
 
         let strings = items
-            .map(|item| item.string_value(documents.xot()))
+            .map(|item| item.string_value(documents.source()))
             .collect::<error::ValueResult<Vec<_>>>();
         match strings {
             Ok(strings) => {
@@ -656,9 +656,9 @@ impl AssertError {
 impl Assertable for AssertError {
     fn assert_result(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        result: &error::ValueResult<Sequence>,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        result: &error::ValueResult<Sequence<::xot::Node>>,
     ) -> TestOutcome {
         match result {
             Ok(sequence) => TestOutcome::Failed(Failure::Error(self.clone(), sequence.clone())),
@@ -668,9 +668,9 @@ impl Assertable for AssertError {
 
     fn assert_value(
         &self,
-        _context: &DynamicContext<'_>,
-        _documents: &mut Documents,
-        _sequence: &Sequence,
+        _context: &DynamicContext<'_, Xot>,
+        _documents: &mut Documents<Xot>,
+        _sequence: &Sequence<::xot::Node>,
     ) -> TestOutcome {
         unreachable!();
     }
@@ -755,9 +755,9 @@ pub(crate) enum TestCaseResult {
 impl TestCaseResult {
     pub(crate) fn assert_result(
         &self,
-        context: &DynamicContext<'_>,
-        documents: &mut Documents,
-        result: &error::ValueResult<Sequence>,
+        context: &DynamicContext<'_, Xot>,
+        documents: &mut Documents<Xot>,
+        result: &error::ValueResult<Sequence<::xot::Node>>,
     ) -> TestOutcome {
         match self {
             TestCaseResult::AnyOf(a) => a.assert_result(context, documents, result),
@@ -793,7 +793,7 @@ impl ContextLoadable<LoadContext> for TestCaseResult {
     fn load_with_context(
         queries: &Queries,
         context: &LoadContext,
-    ) -> anyhow::Result<impl Query<Self>> {
+    ) -> anyhow::Result<impl Query<Self, Xot>> {
         let code_query = queries.one("@code/string()", convert_string)?;
         let error_query = queries.one(".", move |documents, item| {
             Ok(TestCaseResult::AssertError(AssertError::new(
@@ -874,47 +874,50 @@ impl ContextLoadable<LoadContext> for TestCaseResult {
         // `query.option()` to detect entries (like "error", "assert-true", etc)
         // doesn't work for "any-of", as it contains a list of entries.
         let local_name_query = queries.one("local-name()", convert_string)?;
-        let result_query =
-            queries.one("result/*", move |documents: &mut Documents, item: &Item| {
-                let f =
-                    |documents: &mut Documents, item: &Item, recurse: &Recurse<TestCaseResult>| {
-                        let local_name = local_name_query.execute(documents, item)?;
-                        let r = match local_name.as_ref() {
-                            "any-of" => {
-                                let contents = any_all_recurse.execute(documents, item, recurse)?;
-                                TestCaseResult::AnyOf(AssertAnyOf::new(contents))
-                            }
-                            "all-of" => {
-                                let contents = any_all_recurse.execute(documents, item, recurse)?;
-                                TestCaseResult::AllOf(AssertAllOf::new(contents))
-                            }
-                            "not" => {
-                                let contents = not_recurse.execute(documents, item, recurse)?;
-                                TestCaseResult::Not(AssertNot::new(contents))
-                            }
-                            "error" => error_query.execute(documents, item)?,
-                            "assert-true" => TestCaseResult::AssertTrue(AssertTrue::new()),
-                            "assert-false" => TestCaseResult::AssertFalse(AssertFalse::new()),
-                            "assert-count" => assert_count_query.execute(documents, item)?,
-                            "assert-xml" => assert_xml_query.execute(documents, item)?,
-                            "assert-eq" => assert_eq_query.execute(documents, item)?,
-                            "assert-deep-eq" => assert_deep_eq_query.execute(documents, item)?,
-                            "assert-string-value" => {
-                                assert_string_value_query.execute(documents, item)?
-                            }
-                            "assert" => assert_query.execute(documents, item)?,
-                            "assert-permutation" => {
-                                assert_permutation_query.execute(documents, item)?
-                            }
-                            "assert-empty" => TestCaseResult::AssertEmpty(AssertEmpty::new()),
-                            "assert-type" => assert_type_query.execute(documents, item)?,
-                            _ => TestCaseResult::Unsupported,
-                        };
-                        Ok(r)
+        let result_query = queries.one(
+            "result/*",
+            move |documents: &mut Documents<Xot>, item: &Item<::xot::Node>| {
+                let f = |documents: &mut Documents<Xot>,
+                         item: &Item<::xot::Node>,
+                         recurse: &Recurse<TestCaseResult, Xot>| {
+                    let local_name = local_name_query.execute(documents, item)?;
+                    let r = match local_name.as_ref() {
+                        "any-of" => {
+                            let contents = any_all_recurse.execute(documents, item, recurse)?;
+                            TestCaseResult::AnyOf(AssertAnyOf::new(contents))
+                        }
+                        "all-of" => {
+                            let contents = any_all_recurse.execute(documents, item, recurse)?;
+                            TestCaseResult::AllOf(AssertAllOf::new(contents))
+                        }
+                        "not" => {
+                            let contents = not_recurse.execute(documents, item, recurse)?;
+                            TestCaseResult::Not(AssertNot::new(contents))
+                        }
+                        "error" => error_query.execute(documents, item)?,
+                        "assert-true" => TestCaseResult::AssertTrue(AssertTrue::new()),
+                        "assert-false" => TestCaseResult::AssertFalse(AssertFalse::new()),
+                        "assert-count" => assert_count_query.execute(documents, item)?,
+                        "assert-xml" => assert_xml_query.execute(documents, item)?,
+                        "assert-eq" => assert_eq_query.execute(documents, item)?,
+                        "assert-deep-eq" => assert_deep_eq_query.execute(documents, item)?,
+                        "assert-string-value" => {
+                            assert_string_value_query.execute(documents, item)?
+                        }
+                        "assert" => assert_query.execute(documents, item)?,
+                        "assert-permutation" => {
+                            assert_permutation_query.execute(documents, item)?
+                        }
+                        "assert-empty" => TestCaseResult::AssertEmpty(AssertEmpty::new()),
+                        "assert-type" => assert_type_query.execute(documents, item)?,
+                        _ => TestCaseResult::Unsupported,
                     };
+                    Ok(r)
+                };
                 let recurse = Recurse::new(&f);
                 recurse.execute(documents, item)
-            })?;
+            },
+        )?;
         Ok(result_query)
     }
 }
@@ -924,31 +927,31 @@ pub struct AssertCountFailure(usize);
 #[derive(Debug, PartialEq)]
 pub enum AssertStringValueFailure {
     WrongStringValue(String),
-    WrongValue(Sequence),
+    WrongValue(Sequence<::xot::Node>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum AssertXmlFailure {
     WrongXml(String),
-    WrongValue(Sequence),
+    WrongValue(Sequence<::xot::Node>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Failure {
     AnyOf(AssertAnyOf, Vec<TestOutcome>),
     Not(AssertNot, Box<TestOutcome>),
-    Eq(AssertEq, Sequence),
-    DeepEq(AssertDeepEq, Sequence),
-    True(AssertTrue, Sequence),
-    False(AssertFalse, Sequence),
+    Eq(AssertEq, Sequence<::xot::Node>),
+    DeepEq(AssertDeepEq, Sequence<::xot::Node>),
+    True(AssertTrue, Sequence<::xot::Node>),
+    False(AssertFalse, Sequence<::xot::Node>),
     Count(AssertCount, AssertCountFailure),
     StringValue(AssertStringValue, AssertStringValueFailure),
     Xml(AssertXml, AssertXmlFailure),
-    Assert(Assert, Sequence),
-    Permutation(AssertPermutation, Sequence),
-    Empty(AssertEmpty, Sequence),
-    Error(AssertError, Sequence),
-    Type(AssertType, Sequence),
+    Assert(Assert, Sequence<::xot::Node>),
+    Permutation(AssertPermutation, Sequence<::xot::Node>),
+    Empty(AssertEmpty, Sequence<::xot::Node>),
+    Error(AssertError, Sequence<::xot::Node>),
+    Type(AssertType, Sequence<::xot::Node>),
 }
 
 impl fmt::Display for Failure {
@@ -1047,11 +1050,11 @@ impl fmt::Display for Failure {
     }
 }
 
-fn run_xpath(expr: &XPathExpr) -> error::Result<Sequence> {
+fn run_xpath(expr: &XPathExpr) -> error::Result<Sequence<::xot::Node>> {
     let queries = Queries::default();
     let q = queries.sequence(expr)?;
 
-    let mut documents = Documents::default();
+    let mut documents = Documents::<Xot>::default();
 
     // we don't need any particular context to execute this query
     q.execute_build_context(&mut documents, |_build| {})
@@ -1059,9 +1062,9 @@ fn run_xpath(expr: &XPathExpr) -> error::Result<Sequence> {
 
 fn run_xpath_with_result(
     expr: &XPathExpr,
-    sequence: &Sequence,
-    documents: &mut Documents,
-) -> error::Result<Sequence> {
+    sequence: &Sequence<::xot::Node>,
+    documents: &mut Documents<Xot>,
+) -> error::Result<Sequence<::xot::Node>> {
     let mut builder = context::StaticContextBuilder::default();
     let name = Name::name("result");
     builder.variable_names([name.clone()]);
@@ -1112,7 +1115,7 @@ mod tests {
     <any-of>
       <assert>$result/x = ('http://www.example.com', 'http://www.example.com/')</assert>
       <assert>$result/x = 'http://www.example.com/base'</assert>
-   </any-of>
+    </any-of>
   </result>
 </doc>"#,
             XPATH_TEST_NS

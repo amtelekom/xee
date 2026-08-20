@@ -46,7 +46,9 @@ impl AtomicCompare for OpGt {
             (DayTimeDuration(a), DayTimeDuration(b)) => Ok(a > b),
             (Binary(BinaryType::Hex, a), Binary(BinaryType::Hex, b)) => Ok(a > b),
             (Binary(BinaryType::Base64, a), Binary(BinaryType::Base64, b)) => Ok(a > b),
-            _ => Err(error::Error::XPTY0004),
+            _ => Err(error::Error::XPTY0004(
+                "OpGt::atomic_compare called with an unsupported combination of Atomic types",
+            )),
         }
     }
 

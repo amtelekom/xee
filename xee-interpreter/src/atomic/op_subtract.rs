@@ -80,7 +80,9 @@ pub(crate) fn op_subtract(
         (Atomic::DayTimeDuration(a), Atomic::DayTimeDuration(b)) => {
             Ok(op_subtract_day_time_durations(a, b)?)
         }
-        _ => Err(error::Error::XPTY0004),
+        _ => Err(error::Error::XPTY0004(
+            "op_subtract called with an unsupported combination of Atomic types",
+        )),
     }
 }
 

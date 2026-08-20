@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use xee_datasource::{XmlDS, XmlNode};
+
 use crate::error;
 use crate::sequence::traits::{SequenceCompare, SequenceCore, SequenceExt, SequenceOrder};
 use crate::sequence::Item;
@@ -8,21 +10,23 @@ use crate::sequence::Item;
 const MAXIMUM_RANGE_SIZE: i64 = 2_i64.pow(25);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Many {
-    items: Rc<[Item]>,
+pub struct Many<N: XmlNode> {
+    items: Rc<[Item<N>]>,
 }
 
-impl Many {}
+impl<N: XmlNode> Many<N> {}
 
-impl From<Vec<Item>> for Many {
-    fn from(items: Vec<Item>) -> Self {
-        Many {
+impl<N: XmlNode> From<Vec<Item<N>>> for Many<N> {
+    fn from(items: Vec<Item<N>>) -> Self {
+        Many::<N> {
             items: items.into(),
         }
     }
 }
 
-impl<'a> SequenceCore<'a, std::iter::Cloned<std::slice::Iter<'a, Item>>> for Many {
+impl<'a, N: XmlNode> SequenceCore<'a, std::iter::Cloned<std::slice::Iter<'a, Item<N>>>, N>
+    for Many<N>
+{
     #[inline]
     fn is_empty(&self) -> bool {
         self.items.is_empty()
@@ -34,22 +38,26 @@ impl<'a> SequenceCore<'a, std::iter::Cloned<std::slice::Iter<'a, Item>>> for Man
     }
 
     #[inline]
-    fn get(&self, index: usize) -> Option<Item> {
+    fn get(&self, index: usize) -> Option<Item<N>> {
         self.items.get(index).cloned()
     }
 
     #[inline]
-    fn one(self) -> error::Result<Item> {
-        Err(error::Error::XPTY0004)
+    fn one(self) -> error::Result<Item<N>> {
+        Err(error::Error::XPTY0004(
+            "Many::one called on a sequence with more than one item",
+        ))
     }
 
     #[inline]
-    fn option(self) -> error::Result<Option<Item>> {
-        Err(error::Error::XPTY0004)
+    fn option(self) -> error::Result<Option<Item<N>>> {
+        Err(error::Error::XPTY0004(
+            "Many::option called on a sequence with more than one item",
+        ))
     }
 
     #[inline]
-    fn iter(&'a self) -> std::iter::Cloned<std::slice::Iter<'a, Item>> {
+    fn iter(&'a self) -> std::iter::Cloned<std::slice::Iter<'a, Item<N>>> {
         self.items.iter().cloned()
     }
 
@@ -65,31 +73,35 @@ impl<'a> SequenceCore<'a, std::iter::Cloned<std::slice::Iter<'a, Item>>> for Man
     }
 
     #[inline]
-    fn string_value(&self, _xot: &xot::Xot) -> error::Result<String> {
-        Err(error::Error::XPTY0004)
+    fn string_value<S: XmlDS<Node = N>>(&self, _source: &S) -> error::Result<String> {
+        Err(error::Error::XPTY0004(
+            "Many::string_value called on a sequence with more than one item",
+        ))
     }
 }
 
-impl<'a, I> SequenceExt<'a, I> for Many
+impl<'a, I, N: XmlNode + 'a> SequenceExt<'a, I, N> for Many<N>
 where
-    I: Iterator<Item = Item> + 'a,
-    Many: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    Many<N>: SequenceCore<'a, I, N>,
 {
 }
 
-impl<'a, I> SequenceCompare<'a, I> for Many
+impl<'a, I, N: XmlNode + 'a> SequenceCompare<'a, I, N> for Many<N>
 where
-    I: Iterator<Item = Item> + 'a,
-    Many: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>> + 'a,
+    Many<N>: SequenceCore<'a, I, N>,
 {
 }
 
-impl<'a, I> SequenceOrder<'a, I> for Many
+impl<'a, I, N: XmlNode + 'a> SequenceOrder<'a, I, N> for Many<N>
 where
-    I: Iterator<Item = Item>,
-    Many: SequenceCore<'a, I>,
+    I: Iterator<Item = Item<N>>,
+    Many<N>: SequenceCore<'a, I, N>,
 {
-    fn one_node(&self) -> error::Result<xot::Node> {
-        Err(error::Error::XPTY0004)
+    fn one_node(&self) -> error::Result<N> {
+        Err(error::Error::XPTY0004(
+            "Many::one_node called on a sequence with more than one item",
+        ))
     }
 }

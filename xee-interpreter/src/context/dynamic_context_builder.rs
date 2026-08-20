@@ -3,6 +3,7 @@ use std::{cell::RefCell, ops::Deref, rc::Rc};
 use ahash::{HashMap, HashMapExt};
 use iri_string::types::{IriStr, IriString};
 
+use crate::function::XmlDS;
 use crate::{interpreter, sequence, xml};
 
 use super::{DynamicContext, Variables};
@@ -15,58 +16,58 @@ use super::{DynamicContext, Variables};
 /// You can supply a context item, documents, variables and the like in order
 /// to construct a dynamic context used to execute an XPath instruction.
 #[derive(Debug, Clone)]
-pub struct DynamicContextBuilder<'a> {
-    program: &'a interpreter::Program,
-    context_item: Option<sequence::Item>,
-    documents: DocumentsRef,
-    variables: Variables,
+pub struct DynamicContextBuilder<'a, S: XmlDS> {
+    program: &'a interpreter::Program<S>,
+    context_item: Option<sequence::Item<S::Node>>,
+    documents: DocumentsRef<S>,
+    variables: Variables<S>,
     current_datetime: chrono::DateTime<chrono::offset::FixedOffset>,
-    default_collection: Option<sequence::Sequence>,
-    collections: HashMap<IriString, sequence::Sequence>,
-    default_uri_collection: Option<sequence::Sequence>,
-    uri_collections: HashMap<IriString, sequence::Sequence>,
+    default_collection: Option<sequence::Sequence<S::Node>>,
+    collections: HashMap<IriString, sequence::Sequence<S::Node>>,
+    default_uri_collection: Option<sequence::Sequence<S::Node>>,
+    uri_collections: HashMap<IriString, sequence::Sequence<S::Node>>,
     environment_variables: HashMap<String, String>,
 }
 
 /// A shallow wrapper around a collection of XML documents
 /// [`xml::Documents`]
 #[derive(Debug, Clone)]
-pub struct DocumentsRef(Rc<RefCell<xml::Documents>>);
+pub struct DocumentsRef<S: XmlDS>(Rc<RefCell<xml::Documents<S>>>);
 
-impl Deref for DocumentsRef {
-    type Target = RefCell<xml::Documents>;
+impl<S: XmlDS> Deref for DocumentsRef<S> {
+    type Target = RefCell<xml::Documents<S>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl From<xml::Documents> for DocumentsRef {
-    fn from(documents: xml::Documents) -> Self {
+impl<S: XmlDS> From<xml::Documents<S>> for DocumentsRef<S> {
+    fn from(documents: xml::Documents<S>) -> Self {
         Self(Rc::new(RefCell::new(documents)))
     }
 }
 
-impl DocumentsRef {
+impl<S: XmlDS> DocumentsRef<S> {
     pub fn new() -> Self {
         Self(Rc::new(RefCell::new(xml::Documents::new())))
     }
 }
 
-impl Default for DocumentsRef {
+impl<S: XmlDS> Default for DocumentsRef<S> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> DynamicContextBuilder<'a> {
+impl<'a, S: XmlDS> DynamicContextBuilder<'a, S> {
     /// Construct a new `DynamicContextBuilder` with the given `StaticContext`.
-    pub(crate) fn new(program: &'a interpreter::Program) -> Self {
+    pub(crate) fn new(program: &'a interpreter::Program<S>) -> Self {
         Self {
             program,
             context_item: None,
             documents: DocumentsRef::new(),
-            variables: Variables::new(),
+            variables: Variables::<S>::new(),
             current_datetime: chrono::offset::Local::now().into(),
             default_collection: None,
             collections: HashMap::new(),
@@ -79,13 +80,13 @@ impl<'a> DynamicContextBuilder<'a> {
     /// Set the context item of the [`DynamicContext`].
     ///
     /// Without this, the [`DynamicContext`] will have no context item.
-    pub fn context_item(&mut self, context_item: sequence::Item) -> &mut Self {
+    pub fn context_item(&mut self, context_item: sequence::Item<S::Node>) -> &mut Self {
         self.context_item = Some(context_item);
         self
     }
 
     /// Set a node as the context item of the [`DynamicContext`].
-    pub fn context_node(&mut self, node: xot::Node) -> &mut Self {
+    pub fn context_node(&mut self, node: S::Node) -> &mut Self {
         self.context_item(sequence::Item::Node(node));
         self
     }
@@ -93,7 +94,7 @@ impl<'a> DynamicContextBuilder<'a> {
     /// Set the documents of the [`DynamicContext`].
     ///
     /// You can give it either owned documents or a [`DocumentsRef`].
-    pub fn documents(&mut self, documents: impl Into<DocumentsRef>) -> &mut Self {
+    pub fn documents(&mut self, documents: impl Into<DocumentsRef<S>>) -> &mut Self {
         self.documents = documents.into();
         self
     }
@@ -101,7 +102,7 @@ impl<'a> DynamicContextBuilder<'a> {
     /// Set the variables of the [`DynamicContext`].
     ///
     /// Without this, the [`DynamicContext`] will have no variables.
-    pub fn variables(&mut self, variables: Variables) -> &mut Self {
+    pub fn variables(&mut self, variables: Variables<S>) -> &mut Self {
         self.variables = variables;
         self
     }
@@ -118,13 +119,13 @@ impl<'a> DynamicContextBuilder<'a> {
     }
 
     /// Set the default collection
-    pub fn default_collection(&mut self, sequence: sequence::Sequence) -> &mut Self {
+    pub fn default_collection(&mut self, sequence: sequence::Sequence<S::Node>) -> &mut Self {
         self.default_collection = Some(sequence);
         self
     }
 
     /// Set a collection
-    pub fn collection(&mut self, uri: &IriStr, sequence: sequence::Sequence) -> &mut Self {
+    pub fn collection(&mut self, uri: &IriStr, sequence: sequence::Sequence<S::Node>) -> &mut Self {
         self.collections.insert((*uri).into(), sequence);
         self
     }
@@ -157,9 +158,9 @@ impl<'a> DynamicContextBuilder<'a> {
         self
     }
 
-    fn uris_into_sequence(uris: &[&IriStr]) -> sequence::Sequence {
+    fn uris_into_sequence(uris: &[&IriStr]) -> sequence::Sequence<S::Node> {
         // turn the URIs into a sequence
-        let items: Vec<sequence::Item> = uris
+        let items: Vec<sequence::Item<S::Node>> = uris
             .iter()
             .map(|uri| {
                 let iri_string: IriString = (*uri).into();
@@ -170,7 +171,7 @@ impl<'a> DynamicContextBuilder<'a> {
     }
 
     /// Build the `DynamicContext`.
-    pub fn build(&self) -> DynamicContext<'_> {
+    pub fn build(&self) -> DynamicContext<'_, S> {
         DynamicContext::new(
             self.program,
             self.context_item.clone(),

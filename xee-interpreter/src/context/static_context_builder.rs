@@ -1,9 +1,10 @@
 use ahash::HashMap;
 use iri_string::types::IriAbsoluteString;
+use xee_datasource::xmlname::OwnedName;
 use xee_name::Namespaces;
-use xot::xmlname::OwnedName;
 
 use crate::context;
+use crate::function::XmlDS;
 
 #[derive(Debug, Clone, Default)]
 pub struct StaticContextBuilder<'a> {
@@ -80,7 +81,7 @@ impl<'a> StaticContextBuilder<'a> {
     /// This will always include the default known namespaces for
     /// XPath, and the default function namespace will be the `fn` namespace
     /// if not set.
-    pub fn build(&self) -> context::StaticContext {
+    pub fn build<S: XmlDS>(&self) -> context::StaticContext<S> {
         let mut namespaces = Namespaces::default_namespaces();
         for (prefix, uri) in &self.namespaces {
             namespaces.insert(prefix.to_string(), uri.to_string());
@@ -118,7 +119,7 @@ mod tests {
     #[test]
     fn test_default_behavior() {
         let builder = StaticContextBuilder::default();
-        let static_context = builder.build();
+        let static_context = builder.build::<::xot::Xot>();
         assert_eq!(static_context.namespaces().default_element_namespace(), "");
         assert_eq!(
             static_context.namespaces().default_function_namespace,

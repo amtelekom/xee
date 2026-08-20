@@ -3,6 +3,7 @@ use iri_string::types::{IriAbsoluteStr, IriReferenceString, IriString};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use xot::Xot;
 
 use xee_xpath::{context, Documents, Queries, Query};
 use xee_xpath_load::{convert_string, ContextLoadable};
@@ -53,9 +54,9 @@ impl Source {
     pub(crate) fn node(
         &self,
         base_dir: &Path,
-        documents: &mut Documents,
+        documents: &mut Documents<Xot>,
         base_uri: Option<&IriAbsoluteStr>,
-    ) -> Result<xot::Node> {
+    ) -> Result<::xot::Node> {
         // if we have a role that requires a URI we need to resolve it
         let uri: Option<IriString> = match &self.role {
             SourceRole::ContextAndDoc(uri) => {
@@ -98,7 +99,7 @@ impl Source {
 
                 let documents_ref = documents.documents().clone();
                 let handle = documents_ref.borrow_mut().add_string(
-                    documents.xot_mut(),
+                    documents.source_mut(),
                     uri.as_deref(),
                     &xml,
                 )?;
@@ -115,7 +116,7 @@ impl Source {
                 // TODO: is this right?
                 let documents_ref = documents.documents().clone();
                 let handle = documents_ref.borrow_mut().add_string(
-                    documents.xot_mut(),
+                    documents.source_mut(),
                     uri.as_deref(),
                     value,
                 )?;
@@ -146,7 +147,10 @@ impl ContextLoadable<LoadContext> for Sources {
         builder
     }
 
-    fn load_with_context(queries: &Queries, context: &LoadContext) -> Result<impl Query<Self>> {
+    fn load_with_context(
+        queries: &Queries,
+        context: &LoadContext,
+    ) -> Result<impl Query<Self, Xot>> {
         let file_query = queries.option("@file/string()", convert_string)?;
         let xpath_content_query = queries.one("content/string()", convert_string)?;
         let role_query = queries.option("@role/string()", convert_string)?;

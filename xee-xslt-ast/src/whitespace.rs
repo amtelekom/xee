@@ -1,27 +1,28 @@
-use xot::{Node, NodeEdge, Value, Xot};
+use xee_datasource::{Element, StringNewtype, XmlAttribAccess};
+use xee_datasource::{NodeEdge, ValueRef, XmlDS};
 
 use crate::names::Names;
 
-pub(crate) fn strip_whitespace(xot: &mut Xot, names: &Names, node: Node) {
+pub(crate) fn strip_whitespace<S: XmlDS>(source: &mut S, names: &Names<S>, node: S::Node) {
     // all comments and processing instructions are removed
     // any text nodes that are now adjacent to each other are merged
     // we need to do this before anything else, otherwise we miss out on
     // some whitespace text nodes in the next/previous sibling rules
-    strip_comment_pi(xot, node);
+    strip_comment_pi(source, node);
 
     let mut to_remove = vec![];
     let mut xml_space_preserve = vec![];
-    for edge in xot.traverse(node) {
+    for edge in source.traverse(node) {
         match edge {
-            NodeEdge::Start(node) => match xot.value(node) {
-                Value::Text(text)
+            NodeEdge::Start(node) => match source.value(node) {
+                ValueRef::Text(text)
                     if is_xml_whitespace(text.get())
-                        && !is_xml_space_preserve(xot, names, node, &xml_space_preserve) =>
+                        && !is_xml_space_preserve(source, names, node, &xml_space_preserve) =>
                 {
                     to_remove.push(node);
                 }
-                Value::Element(_) => {
-                    if let Some(xml_space) = xot.attributes(node).get(xot.xml_space_name()) {
+                ValueRef::Element(_) => {
+                    if let Some(xml_space) = source.attributes(node).get(source.xml_space_name()) {
                         if xml_space == "preserve" {
                             xml_space_preserve.push(true);
                         } else if xml_space == "default" {
@@ -32,7 +33,11 @@ pub(crate) fn strip_whitespace(xot: &mut Xot, names: &Names, node: Node) {
                 _ => {}
             },
             NodeEdge::End(node) => {
-                if xot.is_element(node) && xot.attributes(node).get(xot.xml_space_name()).is_some()
+                if source.is_element(node)
+                    && source
+                        .attributes(node)
+                        .get(source.xml_space_name())
+                        .is_some()
                 {
                     let _ = xml_space_preserve.pop();
                 }
@@ -41,19 +46,19 @@ pub(crate) fn strip_whitespace(xot: &mut Xot, names: &Names, node: Node) {
     }
 
     for node in to_remove {
-        let _ = xot.remove(node);
+        let _ = source.remove(node);
     }
 }
 
-fn strip_comment_pi(xot: &mut Xot, node: Node) {
+fn strip_comment_pi<S: XmlDS>(source: &mut S, node: S::Node) {
     let mut to_remove = vec![];
 
-    for node in xot.descendants(node) {
-        match xot.value(node) {
-            Value::Comment(..) => {
+    for node in source.descendants(node) {
+        match source.value(node) {
+            ValueRef::Comment(..) => {
                 to_remove.push(node);
             }
-            Value::ProcessingInstruction(..) => {
+            ValueRef::ProcessingInstruction(..) => {
                 to_remove.push(node);
             }
             _ => {}
@@ -61,19 +66,19 @@ fn strip_comment_pi(xot: &mut Xot, node: Node) {
     }
 
     for node in to_remove {
-        let _ = xot.remove(node);
+        let _ = source.remove(node);
     }
 }
 
-fn is_xml_space_preserve(
-    xot: &Xot,
-    names: &Names,
-    node: Node,
+fn is_xml_space_preserve<S: XmlDS>(
+    source: &S,
+    names: &Names<S>,
+    node: S::Node,
     xml_space_preserve: &[bool],
 ) -> bool {
     // if the parent is in the ignore list, we never preserve whitespace
-    if let Some(parent) = xot.parent(node) {
-        if let Some(element) = xot.element(parent) {
+    if let Some(parent) = source.parent(node) {
+        if let Some(element) = source.element(parent) {
             // we always preserve space if the parent is xsl:text
             if element.name() == names.xsl_text {
                 return true;
@@ -85,8 +90,8 @@ fn is_xml_space_preserve(
         }
     }
 
-    if let Some(next) = xot.next_sibling(node) {
-        if let Some(element) = xot.element(next) {
+    if let Some(next) = source.next_sibling(node) {
+        if let Some(element) = source.element(next) {
             if names
                 .ignore_xml_space_next_siblings
                 .contains(&element.name())
@@ -96,8 +101,8 @@ fn is_xml_space_preserve(
         }
     }
 
-    if let Some(previous) = xot.previous_sibling(node) {
-        if let Some(element) = xot.element(previous) {
+    if let Some(previous) = source.previous_sibling(node) {
+        if let Some(element) = source.element(previous) {
             if names
                 .ignore_xml_space_previous_siblings
                 .contains(&element.name())
@@ -125,6 +130,8 @@ fn is_xml_whitespace(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use xot::Xot;
+
     use super::*;
 
     #[test]

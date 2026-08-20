@@ -20,7 +20,7 @@ mod normalization;
 mod opc;
 mod serialization;
 mod traits;
-mod variant;
+pub mod variant;
 
 pub use core::Sequence;
 pub use item::{AtomizedItemIter, Item};

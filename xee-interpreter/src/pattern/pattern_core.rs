@@ -1,5 +1,5 @@
+use xee_datasource::{XmlDS, XmlNodeWrapper};
 use xee_xpath_type::ast::KindTest;
-use xot::Xot;
 
 use xee_xpath_ast::pattern;
 
@@ -7,16 +7,25 @@ use crate::function::InlineFunctionId;
 use crate::sequence::Item;
 use crate::xml;
 
-pub(crate) enum NodeMatch {
-    Match(Option<xot::Node>),
+pub(crate) enum NodeMatch<S: XmlDS> {
+    Match(Option<S::Node>),
     NotMatch,
 }
 
-pub(crate) trait PredicateMatcher {
-    fn match_predicate(&mut self, inline_function_id: InlineFunctionId, item: &Item) -> bool;
-    fn xot(&self) -> &Xot;
+pub(crate) trait PredicateMatcher<S: XmlDS> {
+    fn match_predicate(
+        &mut self,
+        inline_function_id: InlineFunctionId,
+        item: &Item<S::Node>,
+    ) -> bool;
 
-    fn matches(&mut self, pattern: &pattern::Pattern<InlineFunctionId>, item: &Item) -> bool {
+    fn source(&self) -> &S;
+
+    fn matches(
+        &mut self,
+        pattern: &pattern::Pattern<InlineFunctionId>,
+        item: &Item<S::Node>,
+    ) -> bool {
         match pattern {
             pattern::Pattern::Expr(expr_pattern) => self.matches_expr_pattern(expr_pattern, item),
             pattern::Pattern::Predicate(predicate_pattern) => {
@@ -28,7 +37,7 @@ pub(crate) trait PredicateMatcher {
     fn matches_expr_pattern(
         &mut self,
         expr_pattern: &pattern::ExprPattern<InlineFunctionId>,
-        item: &Item,
+        item: &Item<S::Node>,
     ) -> bool {
         if let Item::Node(node) = item {
             match expr_pattern {
@@ -45,7 +54,7 @@ pub(crate) trait PredicateMatcher {
     fn matches_predicate_pattern(
         &mut self,
         predicate_pattern: &pattern::PredicatePattern<InlineFunctionId>,
-        item: &Item,
+        item: &Item<S::Node>,
     ) -> bool {
         for predicate in &predicate_pattern.predicates {
             if !self.match_predicate(*predicate, item) {
@@ -58,20 +67,21 @@ pub(crate) trait PredicateMatcher {
     fn matches_binary_expr(
         &mut self,
         binary_expr: &pattern::BinaryExpr<InlineFunctionId>,
-        node: xot::Node,
+        node: S::Node,
     ) -> bool {
+        let item = Item::from(XmlNodeWrapper(node));
         match binary_expr.operator {
             pattern::Operator::Union => {
-                self.matches_expr_pattern(&binary_expr.left, &Item::from(node))
-                    || self.matches_expr_pattern(&binary_expr.right, &Item::from(node))
+                self.matches_expr_pattern(&binary_expr.left, &item)
+                    || self.matches_expr_pattern(&binary_expr.right, &item)
             }
             pattern::Operator::Intersect => {
-                self.matches_expr_pattern(&binary_expr.left, &Item::from(node))
-                    && self.matches_expr_pattern(&binary_expr.right, &Item::from(node))
+                self.matches_expr_pattern(&binary_expr.left, &item)
+                    && self.matches_expr_pattern(&binary_expr.right, &item)
             }
             pattern::Operator::Except => {
-                self.matches_expr_pattern(&binary_expr.left, &Item::from(node))
-                    && !self.matches_expr_pattern(&binary_expr.right, &Item::from(node))
+                self.matches_expr_pattern(&binary_expr.left, &item)
+                    && !self.matches_expr_pattern(&binary_expr.right, &item)
             }
         }
     }
@@ -79,7 +89,7 @@ pub(crate) trait PredicateMatcher {
     fn matches_path_expr(
         &mut self,
         path_expr: &pattern::PathExpr<InlineFunctionId>,
-        node: xot::Node,
+        node: S::Node,
     ) -> bool {
         match &path_expr.root {
             // this one awaits support for variables in patterns. also there are various
@@ -104,11 +114,11 @@ pub(crate) trait PredicateMatcher {
     fn matches_absolute_steps(
         &mut self,
         steps: &[pattern::StepExpr<InlineFunctionId>],
-        node: xot::Node,
+        node: S::Node,
     ) -> bool {
         let node_match = self.matches_relative_steps(steps, node);
         if let NodeMatch::Match(Some(node)) = node_match {
-            self.xot().is_document(node)
+            self.source().is_document(node)
         } else {
             false
         }
@@ -117,17 +127,17 @@ pub(crate) trait PredicateMatcher {
     fn matches_absolute_double_slash_steps(
         &mut self,
         steps: &[pattern::StepExpr<InlineFunctionId>],
-        node: xot::Node,
+        node: S::Node,
     ) -> bool {
         let node_match = self.matches_relative_steps(steps, node);
         if let NodeMatch::Match(Some(node)) = node_match {
             // we need to be under root
             let mut current_node = node;
             loop {
-                if self.xot().is_document(current_node) {
+                if self.source().is_document(current_node) {
                     return true;
                 }
-                if let Some(parent) = self.xot().parent(current_node) {
+                if let Some(parent) = self.source().parent(current_node) {
                     current_node = parent;
                 } else {
                     return false;
@@ -141,8 +151,8 @@ pub(crate) trait PredicateMatcher {
     fn matches_relative_steps(
         &mut self,
         steps: &[pattern::StepExpr<InlineFunctionId>],
-        node: xot::Node,
-    ) -> NodeMatch {
+        node: S::Node,
+    ) -> NodeMatch<S> {
         let mut node = Some(node);
         let mut axis = pattern::ForwardAxis::Child;
         for step in steps.iter().rev() {
@@ -152,7 +162,7 @@ pub(crate) trait PredicateMatcher {
                     match axis {
                         pattern::ForwardAxis::Descendant => {
                             if !matches {
-                                node = self.xot().parent(n);
+                                node = self.source().parent(n);
                                 continue;
                             }
                             axis = new_axis;
@@ -176,7 +186,7 @@ pub(crate) trait PredicateMatcher {
                 }
             }
             if let Some(n) = node {
-                node = self.xot().parent(n);
+                node = self.source().parent(n);
             } else {
                 return NodeMatch::NotMatch;
             }
@@ -187,7 +197,7 @@ pub(crate) trait PredicateMatcher {
     fn matches_step_expr(
         &mut self,
         step: &pattern::StepExpr<InlineFunctionId>,
-        node: xot::Node,
+        node: S::Node,
     ) -> (bool, pattern::ForwardAxis) {
         match step {
             pattern::StepExpr::AxisStep(axis_step) => self.matches_axis_step(axis_step, node),
@@ -202,18 +212,18 @@ pub(crate) trait PredicateMatcher {
     fn matches_axis_step(
         &mut self,
         step: &pattern::AxisStep<InlineFunctionId>,
-        node: xot::Node,
+        node: S::Node,
     ) -> (bool, pattern::ForwardAxis) {
         // if the forward axis is attribute based, we won't match with an element,
         // and vice versa
-        if self.xot().is_attribute_node(node) {
+        if self.source().is_attribute_node(node) {
             if step.forward != pattern::ForwardAxis::Attribute {
                 return (false, step.forward);
             }
         } else if step.forward == pattern::ForwardAxis::Attribute {
             return (false, step.forward);
         }
-        if !Self::matches_node_test(&step.node_test, node, self.xot()) {
+        if !Self::matches_node_test(&step.node_test, node, self.source()) {
             return (false, step.forward);
         }
         // if we have a match, check whether the predicates apply
@@ -229,12 +239,12 @@ pub(crate) trait PredicateMatcher {
     fn matches_postfix_expr(
         &mut self,
         postfix_expr: &pattern::PostfixExpr<InlineFunctionId>,
-        node: xot::Node,
+        node: S::Node,
     ) -> bool {
-        if !self.matches_expr_pattern(&postfix_expr.expr, &Item::from(node)) {
+        let item = Item::Node(node);
+        if !self.matches_expr_pattern(&postfix_expr.expr, &item) {
             return false;
         }
-        let item = Item::Node(node);
         for predicate in &postfix_expr.predicates {
             if !self.match_predicate(*predicate, &item) {
                 return false;
@@ -243,34 +253,38 @@ pub(crate) trait PredicateMatcher {
         true
     }
 
-    fn matches_node_test(node_test: &pattern::NodeTest, node: xot::Node, xot: &Xot) -> bool {
+    fn matches_node_test(node_test: &pattern::NodeTest, node: S::Node, source: &S) -> bool {
         match node_test {
-            pattern::NodeTest::NameTest(name_test) => Self::matches_name_test(name_test, node, xot),
-            pattern::NodeTest::KindTest(kind_test) => Self::matches_kind_test(kind_test, node, xot),
+            pattern::NodeTest::NameTest(name_test) => {
+                Self::matches_name_test(name_test, node, source)
+            }
+            pattern::NodeTest::KindTest(kind_test) => {
+                Self::matches_kind_test(kind_test, node, source)
+            }
         }
     }
 
-    fn matches_name_test(name_test: &pattern::NameTest, node: xot::Node, xot: &Xot) -> bool {
+    fn matches_name_test(name_test: &pattern::NameTest, node: S::Node, source: &S) -> bool {
         match name_test {
             pattern::NameTest::Name(expected_name) => {
                 // TODO: unwrap - what if prefix couldn't be identified?
-                if let Some(node_name) = xot.node_name_ref(node).unwrap() {
-                    expected_name.value.maybe_to_ref(xot) == Some(node_name)
+                if let Some(node_name) = source.node_name_ref(node).unwrap() {
+                    source.owned_name_maybe_to_ref(&expected_name.value) == Some(node_name)
                 } else {
                     false
                 }
             }
             pattern::NameTest::Star => true,
             pattern::NameTest::LocalName(expected_local_name) => {
-                if let Some(name) = xot.node_name(node) {
-                    xot.local_name_str(name) == expected_local_name
+                if let Some(name) = source.node_name(node) {
+                    source.local_name_str(name) == expected_local_name
                 } else {
                     false
                 }
             }
             pattern::NameTest::Namespace(ns) => {
-                if let Some(name) = xot.node_name(node) {
-                    let namespace_uri = xot.uri_str(name);
+                if let Some(name) = source.node_name(node) {
+                    let namespace_uri = source.uri_str(name);
                     namespace_uri == ns
                 } else {
                     false
@@ -279,18 +293,20 @@ pub(crate) trait PredicateMatcher {
         }
     }
 
-    fn matches_kind_test(kind_test: &KindTest, node: xot::Node, xot: &Xot) -> bool {
-        xml::kind_test(kind_test, xot, node)
+    fn matches_kind_test(kind_test: &KindTest, node: S::Node, source: &S) -> bool {
+        xml::kind_test(kind_test, source, node)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use xee_xpath_ast::pattern::transform_pattern;
+    use xot::Xot;
 
     use crate::atomic::Atomic;
 
     use super::*;
+    type Item = crate::sequence::Item<::xot::Node>;
 
     fn parse_pattern(pattern: &str) -> pattern::Pattern<InlineFunctionId> {
         let namespaces = xee_name::Namespaces::default();
@@ -332,12 +348,12 @@ mod tests {
         }
     }
 
-    impl PredicateMatcher for BasicPredicateMatcher<'_> {
+    impl PredicateMatcher<Xot> for BasicPredicateMatcher<'_> {
         fn match_predicate(&mut self, _inline_function_id: InlineFunctionId, _item: &Item) -> bool {
             self.predicate_matches
         }
 
-        fn xot(&self) -> &Xot {
+        fn source(&self) -> &Xot {
             self.xot
         }
     }
@@ -350,7 +366,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
 
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let pattern = parse_pattern("foo");
 
@@ -364,7 +380,7 @@ mod tests {
         let root = xot.parse(r#"<root><foo/></root>"#).unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let pattern = parse_pattern("*");
 
@@ -380,7 +396,7 @@ mod tests {
             .unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("*:foo");
@@ -397,7 +413,7 @@ mod tests {
             .unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let namespaces = xee_name::Namespaces::new(
             vec![
@@ -425,7 +441,7 @@ mod tests {
         let root = xot.parse(r#"<root><foo/></root>"#).unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("notfound");
@@ -439,7 +455,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.first_child(node).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("bar/foo");
@@ -452,7 +468,7 @@ mod tests {
         let root = xot.parse(r#"<root><bar><foo/></bar></root>"#).unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("notfound/foo");
@@ -466,7 +482,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.first_child(node).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("bar/descendant::foo");
@@ -480,7 +496,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.first_child(node).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("notfound/descendant::foo");
@@ -497,7 +513,7 @@ mod tests {
         let node = xot.first_child(document_element).unwrap();
         let node = xot.first_child(node).unwrap();
         let node = xot.first_child(node).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("qux/descendant::foo");
@@ -514,7 +530,7 @@ mod tests {
         let node = xot.first_child(document_element).unwrap();
         let node = xot.first_child(node).unwrap();
         let node = xot.first_child(node).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("notfound/descendant::foo");
@@ -529,7 +545,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.attributes(node).get_node(bar_name).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("@bar");
@@ -544,7 +560,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.attributes(node).get_node(bar_name).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("@qux");
@@ -559,7 +575,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.attributes(node).get_node(bar_name).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("bar");
@@ -574,7 +590,7 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let node = xot.attributes(node).get_node(bar_name).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
 
@@ -588,7 +604,7 @@ mod tests {
         let root = xot.parse(r#"<root><bar /></root>"#).unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("@bar");
@@ -602,10 +618,10 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let element_node = node;
-        let element_item: Item = element_node.into();
+        let element_item: Item = XmlNodeWrapper(element_node).into();
         let attribute_name = xot.add_name("bar");
         let attribute_node = xot.attributes(node).get_node(attribute_name).unwrap();
-        let attribute_item: Item = attribute_node.into();
+        let attribute_item: Item = XmlNodeWrapper(attribute_node).into();
 
         // the axis determines whether we match. This is a bit
         // counter intuitive, but the spec affirms it.
@@ -628,12 +644,12 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
         let element_node = node;
-        let element_item: Item = element_node.into();
+        let element_item: Item = XmlNodeWrapper(element_node).into();
         let attribute_name = xot.add_name("bar");
         let attribute_node = xot.attributes(node).get_node(attribute_name).unwrap();
-        let attribute_item: Item = attribute_node.into();
+        let attribute_item: Item = XmlNodeWrapper(attribute_node).into();
         let text_node = xot.first_child(node).unwrap();
-        let text_item: Item = text_node.into();
+        let text_item: Item = XmlNodeWrapper(text_node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("element()");
@@ -646,9 +662,9 @@ mod tests {
     fn test_matches_absolute_slash() {
         let mut xot = Xot::new();
         let root = xot.parse(r#"<root/>"#).unwrap();
-        let item: Item = root.into();
+        let item: Item = XmlNodeWrapper(root).into();
         let document_element = xot.document_element(root).unwrap();
-        let document_element_item: Item = document_element.into();
+        let document_element_item: Item = XmlNodeWrapper(document_element).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("/");
@@ -660,10 +676,10 @@ mod tests {
     fn test_matches_absolute_slash_with_element() {
         let mut xot = Xot::new();
         let root = xot.parse(r#"<root/>"#).unwrap();
-        let item: Item = root.into();
+        let item: Item = XmlNodeWrapper(root).into();
 
         let document_element = xot.document_element(root).unwrap();
-        let document_element_item: Item = document_element.into();
+        let document_element_item: Item = XmlNodeWrapper(document_element).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("/root");
@@ -675,10 +691,10 @@ mod tests {
     fn test_matches_absolute_double_slash() {
         let mut xot = Xot::new();
         let root = xot.parse(r#"<root/>"#).unwrap();
-        let item: Item = root.into();
+        let item: Item = XmlNodeWrapper(root).into();
 
         let document_element = xot.document_element(root).unwrap();
-        let document_element_item: Item = document_element.into();
+        let document_element_item: Item = XmlNodeWrapper(document_element).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("//root");
@@ -690,11 +706,11 @@ mod tests {
     fn test_matches_absolute_double_slash_nesting() {
         let mut xot = Xot::new();
         let root = xot.parse(r#"<root><foo/></root>"#).unwrap();
-        let item: Item = root.into();
+        let item: Item = XmlNodeWrapper(root).into();
         let document_element = xot.document_element(root).unwrap();
-        let document_element_item: Item = document_element.into();
+        let document_element_item: Item = XmlNodeWrapper(document_element).into();
         let foo_node = xot.first_child(document_element).unwrap();
-        let foo_item: Item = foo_node.into();
+        let foo_item: Item = XmlNodeWrapper(foo_node).into();
 
         let mut pm = BasicPredicateMatcher::new(&xot);
         let pattern = parse_pattern("//root/foo");
@@ -720,7 +736,7 @@ mod tests {
         let root = xot.parse(r#"<root><foo/></root>"#).unwrap();
         let document_element = xot.document_element(root).unwrap();
         let node = xot.first_child(document_element).unwrap();
-        let item: Item = node.into();
+        let item: Item = XmlNodeWrapper(node).into();
 
         let pattern = parse_pattern("foo[1]");
 
@@ -736,8 +752,8 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let foo_node = xot.first_child(document_element).unwrap();
         let bar_node = xot.next_sibling(foo_node).unwrap();
-        let foo_item: Item = foo_node.into();
-        let bar_item: Item = bar_node.into();
+        let foo_item: Item = XmlNodeWrapper(foo_node).into();
+        let bar_item: Item = XmlNodeWrapper(bar_node).into();
 
         let pattern = parse_pattern("foo | bar");
 
@@ -754,8 +770,8 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let foo_node = xot.first_child(document_element).unwrap();
         let bar_node = xot.next_sibling(foo_node).unwrap();
-        let foo_item: Item = foo_node.into();
-        let bar_item: Item = bar_node.into();
+        let foo_item: Item = XmlNodeWrapper(foo_node).into();
+        let bar_item: Item = XmlNodeWrapper(bar_node).into();
 
         let pattern = parse_pattern("(foo | bar) intersect foo");
 
@@ -772,8 +788,8 @@ mod tests {
         let document_element = xot.document_element(root).unwrap();
         let foo_node = xot.first_child(document_element).unwrap();
         let bar_node = xot.next_sibling(foo_node).unwrap();
-        let foo_item: Item = foo_node.into();
-        let bar_item: Item = bar_node.into();
+        let foo_item: Item = XmlNodeWrapper(foo_node).into();
+        let bar_item: Item = XmlNodeWrapper(bar_node).into();
 
         let pattern = parse_pattern("(foo | bar) except foo");
 

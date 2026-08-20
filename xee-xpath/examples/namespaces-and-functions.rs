@@ -1,9 +1,10 @@
 use xee_xpath::context::StaticContextBuilder;
 use xee_xpath::{DocumentHandle, Documents, Queries, Query};
+use xot::Xot;
 
 /// A higher-level wrapper around Xee's XPath functionality
 struct Document<'a> {
-    documents: Documents,
+    documents: Documents<Xot>,
     queries: Queries<'a>,
     doc_handle: DocumentHandle,
 }
@@ -11,7 +12,7 @@ struct Document<'a> {
 impl<'a> Document<'a> {
     /// Create a new document with XML content and namespace mappings
     fn new(xml: &str, namespaces: &[(&'a str, &'a str)]) -> Self {
-        let mut documents = Documents::new();
+        let mut documents = Documents::new(Xot::new());
         let doc_handle = documents.add_string_without_uri(xml).unwrap();
 
         let mut builder = StaticContextBuilder::default();
@@ -33,7 +34,7 @@ impl<'a> Document<'a> {
             .sequence(xpath)
             .and_then(|it| it.execute(&mut self.documents, self.doc_handle))
             .unwrap()
-            .string_value(self.documents.xot())
+            .string_value(self.documents.source())
             .unwrap()
     }
 }
