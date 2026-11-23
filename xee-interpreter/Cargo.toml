@@ -10,7 +10,6 @@ description = "Interpreter for XPath and XSLT"
 repository = "https://github.com/Paligo/xee"
 readme = "README.md"
 documentation = "https://docs.rs/xee-interpreter"
-homepage = "https://github.com/Paligo/xee"
 
 [features]
 serde = [
@@ -35,7 +34,6 @@ ahash = { workspace = true }
 arrayvec = "0.7.6"
 chumsky = { workspace = true }
 iri-string = { workspace = true }
-next-gen = "0.1.1"
 strum = { workspace = true }
 num = "0.4.3"
 num-derive = "0.4.2"

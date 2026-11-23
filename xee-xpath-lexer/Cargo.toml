@@ -9,7 +9,6 @@ description = "XPath lexer"
 repository = "https://github.com/Paligo/xee"
 readme = "README.md"
 documentation = "https://docs.rs/xee-xpath-ast"
-homepage = "https://github.com/Paligo/xee"
 
 [features]
 serde = ["dep:serde", "ibig/serde"]

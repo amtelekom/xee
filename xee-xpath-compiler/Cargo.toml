@@ -9,7 +9,6 @@ description = "XPath 3.1 compiler of AST to Xee IR"
 repository = "https://github.com/Paligo/xee"
 readme = "README.md"
 documentation = "https://docs.rs/xee-xpath"
-homepage = "https://github.com/Paligo/xee"
 
 [features]
 serde = ["xee-xpath-ast/serde", "xee-interpreter/serde"]

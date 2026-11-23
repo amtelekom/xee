@@ -9,7 +9,6 @@ description = "Conformance testing for Xee's XPath and XSLT implementations"
 repository = "https://github.com/Paligo/xee"
 readme = "README.md"
 documentation = "https://docs.rs/xee-testrunner"
-homepage = "https://github.com/Paligo/xee"
 
 [dependencies]
 xee-xpath-load = { path = "../xee-xpath-load", version = "0.2.0" }

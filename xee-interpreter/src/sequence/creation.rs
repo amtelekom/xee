@@ -15,7 +15,7 @@ use super::{
 };
 
 impl<N: XmlNode> Sequence<N> {
-    pub(crate) fn new(items: Vec<Item<N>>) -> Self {
+    pub fn new(items: Vec<Item<N>>) -> Self {
         match items.len() {
             0 => Self::Empty(Empty {}),
             1 => Self::One(items.into_iter().next().unwrap().into()),

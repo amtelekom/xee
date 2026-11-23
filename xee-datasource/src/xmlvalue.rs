@@ -129,7 +129,7 @@ pub trait StringNewtype: Debug + PartialEq + Eq + Clone + std::hash::Hash {
 /// this is kept in the tree.
 ///
 /// Example: `<foo/>`.
-pub trait Element<S: XmlDS>: Debug + PartialEq + Eq + Clone + Copy + std::hash::Hash {
+pub trait Element<S: XmlDS>: Debug + PartialEq + Eq + Clone + std::hash::Hash {
     /// The name of the element.
     ///
     /// ```rust

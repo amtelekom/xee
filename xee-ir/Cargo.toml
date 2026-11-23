@@ -10,7 +10,6 @@ description = "Xee intermediate representation and compilation to bytecode"
 repository = "https://github.com/Paligo/xee"
 readme = "README.md"
 documentation = "https://docs.rs/xee-ir"
-homepage = "https://github.com/Paligo/xee"
 
 [dependencies]
 xee-xpath-ast = { path = "../xee-xpath-ast", version = "0.1.4" }
